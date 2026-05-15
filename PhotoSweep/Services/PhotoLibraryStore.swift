@@ -383,13 +383,33 @@ final class PhotoLibraryStore: ObservableObject {
 
         for bucket in candidateBuckets.sorted(by: { $0.count > $1.count }) {
             var featurePrints: [(asset: PHAsset, print: VNFeaturePrintObservation)] = []
-            for asset in bucket {
+            for startIndex in stride(from: 0, to: bucket.count, by: 6) {
                 if Task.isCancelled { return }
-                if let featurePrint = await featurePrint(for: asset) {
-                    featurePrints.append((asset, featurePrint))
+
+                let batch = Array(bucket[startIndex..<min(startIndex + 6, bucket.count)])
+                let batchPrints = await withTaskGroup(
+                    of: (PHAsset, VNFeaturePrintObservation)?.self,
+                    returning: [(asset: PHAsset, print: VNFeaturePrintObservation)].self
+                ) { group in
+                    for asset in batch {
+                        group.addTask {
+                            if Task.isCancelled { return nil }
+                            guard let featurePrint = await self.featurePrint(for: asset) else { return nil }
+                            return (asset, featurePrint)
+                        }
+                    }
+
+                    var results: [(asset: PHAsset, print: VNFeaturePrintObservation)] = []
+                    for await result in group {
+                        if let result {
+                            results.append(result)
+                        }
+                    }
+                    return results
                 }
 
-                processed += 1
+                featurePrints.append(contentsOf: batchPrints)
+                processed += batch.count
                 duplicateScanProgress = Double(processed) / Double(totalCandidates)
                 await Task.yield()
             }
@@ -536,13 +556,14 @@ final class PhotoLibraryStore: ObservableObject {
     private func duplicateBucketKey(for asset: PHAsset) -> String {
         let shortSide = min(asset.pixelWidth, asset.pixelHeight)
         let longSide = max(asset.pixelWidth, asset.pixelHeight)
+        let dateBucket = Int((asset.creationDate?.timeIntervalSince1970 ?? 0) / 120)
 
         if asset.mediaType == .video {
             let durationBucket = Int(asset.duration.rounded())
-            return "video-\(shortSide)x\(longSide)-\(durationBucket)"
+            return "video-\(shortSide)x\(longSide)-\(durationBucket)-\(dateBucket)"
         }
 
-        return "image-\(shortSide)x\(longSide)"
+        return "image-\(shortSide)x\(longSide)-\(dateBucket)"
     }
 
     private func duplicateGroups(
@@ -591,7 +612,7 @@ final class PhotoLibraryStore: ObservableObject {
         }
     }
 
-    private func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
+    private nonisolated func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
         guard let image = await thumbnail(for: asset), let cgImage = image.cgImage else {
             return nil
         }
@@ -609,24 +630,34 @@ final class PhotoLibraryStore: ObservableObject {
         }.value
     }
 
-    private func thumbnail(for asset: PHAsset) async -> UIImage? {
+    private nonisolated func thumbnail(for asset: PHAsset) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat
+            options.deliveryMode = .fastFormat
             options.resizeMode = .fast
-            options.isNetworkAccessAllowed = true
+            options.isNetworkAccessAllowed = false
 
             var didResume = false
             PHImageManager.default().requestImage(
                 for: asset,
-                targetSize: CGSize(width: 180, height: 180),
+                targetSize: CGSize(width: 96, height: 96),
                 contentMode: .aspectFill,
                 options: options
             ) { image, info in
+                guard !didResume else { return }
+                if let image {
+                    didResume = true
+                    continuation.resume(returning: image)
+                    return
+                }
+
+                let isCancelled = (info?[PHImageCancelledKey] as? Bool) == true
+                let hasError = info?[PHImageErrorKey] != nil
                 let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
-                guard !isDegraded, !didResume else { return }
-                didResume = true
-                continuation.resume(returning: image)
+                if isCancelled || hasError || !isDegraded {
+                    didResume = true
+                    continuation.resume(returning: nil)
+                }
             }
         }
     }

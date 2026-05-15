@@ -225,6 +225,7 @@ struct ContentView: View {
         .background(Color.black)
         .onAppear {
             updateTiltMonitoring()
+            preheatUpcomingImages()
         }
         .onDisappear {
             tiltController.stop()
@@ -234,6 +235,10 @@ struct ContentView: View {
         }
         .onChange(of: library.currentAsset?.localIdentifier) {
             updateTiltMonitoring()
+            preheatUpcomingImages()
+        }
+        .onChange(of: library.assets.count) {
+            preheatUpcomingImages()
         }
         .onChange(of: tiltToSwipeEnabled) {
             updateTiltMonitoring()
@@ -516,6 +521,30 @@ struct ContentView: View {
                 tiltFeedback = nil
             }
         }
+    }
+
+    private func preheatUpcomingImages() {
+        guard !library.isLoading else { return }
+
+        var fullSizeAssets: [PHAsset] = []
+        if let currentAsset = library.currentAsset {
+            fullSizeAssets.append(currentAsset)
+        }
+        fullSizeAssets.append(contentsOf: library.upcomingAssets(limit: 2))
+
+        PhotoImagePipeline.preheat(
+            assets: fullSizeAssets,
+            displaySize: CGSize(width: 900, height: 1_300),
+            contentMode: .fit,
+            quality: .full
+        )
+
+        PhotoImagePipeline.preheat(
+            assets: library.upcomingAssets(limit: 30),
+            displaySize: CGSize(width: 180, height: 220),
+            contentMode: .fill,
+            quality: .thumbnail
+        )
     }
 
     private func compactNumber(_ value: Int) -> String {

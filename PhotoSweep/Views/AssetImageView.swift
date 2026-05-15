@@ -1,16 +1,56 @@
 import Combine
 import Photos
 import SwiftUI
+import UIKit
 
 enum AssetImageQuality: String {
     case full
     case thumbnail
 }
 
+enum PhotoImagePipeline {
+    static let manager = PHCachingImageManager()
+
+    static func targetSize(for displaySize: CGSize, quality: AssetImageQuality) -> CGSize {
+        let scale = UIScreen.main.scale
+        let minimumPixelSize: CGFloat = quality == .thumbnail ? 180 : 700
+        return CGSize(
+            width: max(displaySize.width * scale, minimumPixelSize),
+            height: max(displaySize.height * scale, minimumPixelSize)
+        )
+    }
+
+    static func options(for quality: AssetImageQuality) -> PHImageRequestOptions {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = quality == .thumbnail ? .fastFormat : .opportunistic
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = quality == .full
+        return options
+    }
+
+    static func contentMode(for contentMode: ContentMode) -> PHImageContentMode {
+        contentMode == .fill ? .aspectFill : .aspectFit
+    }
+
+    static func preheat(
+        assets: [PHAsset],
+        displaySize: CGSize,
+        contentMode: ContentMode,
+        quality: AssetImageQuality
+    ) {
+        guard !assets.isEmpty else { return }
+        manager.startCachingImages(
+            for: assets,
+            targetSize: targetSize(for: displaySize, quality: quality),
+            contentMode: Self.contentMode(for: contentMode),
+            options: options(for: quality)
+        )
+    }
+}
+
 @MainActor
 final class AssetImageLoader: ObservableObject {
     @Published var image: UIImage?
-    private let manager = PHImageManager.default()
     private var requestID: PHImageRequestID?
     private var requestedAssetID: String?
 
@@ -20,26 +60,14 @@ final class AssetImageLoader: ObservableObject {
         }
         requestedAssetID = asset.localIdentifier
         if let requestID {
-            manager.cancelImageRequest(requestID)
+            PHImageManager.default().cancelImageRequest(requestID)
         }
 
-        let scale = UIScreen.main.scale
-        let minimumPixelSize: CGFloat = quality == .thumbnail ? 180 : 600
-        let requestSize = CGSize(
-            width: max(targetSize.width * scale, minimumPixelSize),
-            height: max(targetSize.height * scale, minimumPixelSize)
-        )
-
-        let options = PHImageRequestOptions()
-        options.deliveryMode = quality == .thumbnail ? .fastFormat : .opportunistic
-        options.resizeMode = .fast
-        options.isNetworkAccessAllowed = true
-
-        requestID = manager.requestImage(
+        requestID = PhotoImagePipeline.manager.requestImage(
             for: asset,
-            targetSize: requestSize,
-            contentMode: contentMode == .fill ? .aspectFill : .aspectFit,
-            options: options
+            targetSize: PhotoImagePipeline.targetSize(for: targetSize, quality: quality),
+            contentMode: PhotoImagePipeline.contentMode(for: contentMode),
+            options: PhotoImagePipeline.options(for: quality)
         ) { [weak self] image, _ in
             let assetID = asset.localIdentifier
             Task { @MainActor in
@@ -51,7 +79,7 @@ final class AssetImageLoader: ObservableObject {
 
     deinit {
         if let requestID {
-            manager.cancelImageRequest(requestID)
+            PHImageManager.default().cancelImageRequest(requestID)
         }
     }
 }
