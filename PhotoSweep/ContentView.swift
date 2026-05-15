@@ -5,7 +5,7 @@ import UIKit
 struct ContentView: View {
     @EnvironmentObject private var library: PhotoLibraryStore
     @StateObject private var tiltController = TiltDecisionController()
-    @AppStorage("PhotoSweep.hasCompletedOnboarding") private var hasCompletedOnboarding = false
+    @AppStorage("PhotoSweep.hasCompletedOnboarding.v2") private var hasCompletedOnboarding = false
     @AppStorage("PhotoSweep.tiltToSwipeEnabled") private var tiltToSwipeEnabled = false
     @State private var showingDeleteReview = false
     @State private var showingDuplicateReview = false
@@ -72,7 +72,10 @@ struct ContentView: View {
                     .preferredColorScheme(.dark)
             }
             .sheet(isPresented: $showingSettings) {
-                SettingsView(tiltToSwipeEnabled: $tiltToSwipeEnabled)
+                SettingsView(
+                    tiltToSwipeEnabled: $tiltToSwipeEnabled,
+                    hasCompletedOnboarding: $hasCompletedOnboarding
+                )
                     .preferredColorScheme(.dark)
             }
             .task {
@@ -199,7 +202,11 @@ struct ContentView: View {
                     .frame(maxHeight: .infinity)
                     .padding(.horizontal, 8)
                     .padding(.top, 8)
-                    .padding(.bottom, 6)
+                    .padding(.bottom, 8)
+
+                    swipeActionButtons
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 4)
 
                     quickSkipRail
                 }
@@ -419,6 +426,30 @@ struct ContentView: View {
         }
     }
 
+    private var swipeActionButtons: some View {
+        HStack(spacing: 12) {
+            swipeActionButton(
+                title: "Delete",
+                systemImage: "hand.thumbsdown.fill",
+                color: deleteColor
+            ) {
+                UIImpactFeedbackGenerator(style: .medium).impactOccurred()
+                library.queueDeleteCurrent()
+            }
+            .accessibilityHint("Marks this photo for deletion.")
+
+            swipeActionButton(
+                title: "Keep",
+                systemImage: "hand.thumbsup.fill",
+                color: keepColor
+            ) {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                library.keepCurrent()
+            }
+            .accessibilityHint("Keeps this photo and moves to the next one.")
+        }
+    }
+
     private var positionText: String {
         guard !library.assets.isEmpty else { return "0 / 0" }
         let current = min(library.currentIndex + 1, library.assets.count)
@@ -556,6 +587,32 @@ struct ContentView: View {
             .scaleEffect(isActive ? 1.06 : 1)
     }
 
+    private func swipeActionButton(
+        title: String,
+        systemImage: String,
+        color: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button {
+            action()
+        } label: {
+            Label(title, systemImage: systemImage)
+                .font(.system(.headline, design: .rounded).weight(.black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.84)
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .frame(height: 54)
+                .background(color.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 16, style: .continuous)
+                        .stroke(color.opacity(0.38), lineWidth: 1)
+                }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+    }
+
     private var completionView: some View {
         VStack(spacing: 18) {
             Spacer()
@@ -631,6 +688,7 @@ private struct QuickSkipThumbnail: View {
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Binding var tiltToSwipeEnabled: Bool
+    @Binding var hasCompletedOnboarding: Bool
 
     var body: some View {
         NavigationStack {
@@ -644,6 +702,17 @@ private struct SettingsView: View {
                     Text("Off by default. Tilt left marks delete. Tilt right keeps.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Button {
+                        hasCompletedOnboarding = false
+                        dismiss()
+                    } label: {
+                        Label("Restart Onboarding", systemImage: "arrow.counterclockwise")
+                    }
+                } footer: {
+                    Text("Use this while testing the onboarding flow.")
                 }
             }
             .scrollContentBackground(.hidden)

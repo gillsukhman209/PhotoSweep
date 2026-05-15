@@ -6,101 +6,87 @@ struct OnboardingView: View {
     @State private var selectedPage = 0
 
     private let pages = OnboardingPage.allPages
-    private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
+    private let accent = Color(red: 0.30, green: 0.36, blue: 1.0)
+    private let accentEnd = Color(red: 0.38, green: 0.20, blue: 1.0)
+    private let background = Color(red: 0.06, green: 0.07, blue: 0.13)
 
     var body: some View {
         VStack(spacing: 0) {
-            header
+            progressBars
                 .padding(.horizontal, 22)
-                .padding(.top, 18)
+                .padding(.top, 16)
 
             TabView(selection: $selectedPage) {
                 ForEach(pages.indices, id: \.self) { index in
                     OnboardingPageView(page: pages[index])
                         .tag(index)
-                        .padding(.horizontal, 22)
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
 
-            VStack(spacing: 18) {
-                pageDots
-
-                Button {
-                    advance()
-                } label: {
-                    HStack(spacing: 10) {
-                        Text(selectedPage == pages.count - 1 ? "Start Cleaning" : "Continue")
-                        Image(systemName: "arrow.right")
-                    }
-                    .font(.headline.weight(.bold))
-                    .foregroundStyle(.black)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 56)
-                    .background(keepColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(selectedPage == pages.count - 1 ? "Start cleaning" : "Continue onboarding")
-
-                Button {
-                    onComplete()
-                } label: {
-                    Text("Skip")
-                        .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.62))
-                        .frame(height: 32)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 22)
-            .padding(.bottom, 20)
+            bottomControls
+                .padding(.horizontal, 18)
+                .padding(.bottom, 18)
         }
-        .background(background)
+        .background(background.ignoresSafeArea())
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 18, weight: .black))
-                .foregroundStyle(.black)
-                .frame(width: 38, height: 38)
-                .background(keepColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-
-            Text("PhotoSweep")
-                .font(.system(.headline, design: .rounded).weight(.black))
-                .foregroundStyle(.white)
-
-            Spacer()
-        }
-    }
-
-    private var pageDots: some View {
+    private var progressBars: some View {
         HStack(spacing: 7) {
             ForEach(pages.indices, id: \.self) { index in
-                Capsule()
-                    .fill(index == selectedPage ? keepColor : Color.white.opacity(0.18))
-                    .frame(width: index == selectedPage ? 22 : 7, height: 7)
-                    .animation(.snappy(duration: 0.22), value: selectedPage)
+                GeometryReader { proxy in
+                    Capsule()
+                        .fill(Color.white.opacity(0.18))
+                        .overlay(alignment: .leading) {
+                            Capsule()
+                                .fill(accent)
+                                .frame(width: proxy.size.width * fillAmount(for: index))
+                        }
+                }
+                .frame(height: 5)
             }
         }
+        .animation(.snappy(duration: 0.28), value: selectedPage)
         .accessibilityHidden(true)
     }
 
-    private var background: some View {
-        ZStack {
-            Color.black
+    private var bottomControls: some View {
+        VStack(spacing: 15) {
+            Button {
+                advance()
+            } label: {
+                Text(selectedPage == pages.count - 1 ? "Start Cleaning" : "Continue")
+                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 58)
+                    .background(
+                        LinearGradient(
+                            colors: [Color(red: 0.26, green: 0.48, blue: 1.0), accentEnd],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        ),
+                        in: RoundedRectangle(cornerRadius: 18, style: .continuous)
+                    )
+            }
+            .buttonStyle(.plain)
 
-            LinearGradient(
-                colors: [
-                    Color(red: 0.06, green: 0.12, blue: 0.11).opacity(0.92),
-                    Color.black,
-                    Color(red: 0.04, green: 0.05, blue: 0.08).opacity(0.95)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            Button {
+                onComplete()
+            } label: {
+                Text("Skip")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.42))
+                    .frame(height: 28)
+            }
+            .buttonStyle(.plain)
         }
+    }
+
+    private func fillAmount(for index: Int) -> CGFloat {
+        if index < selectedPage { return 1 }
+        if index == selectedPage { return 0.78 }
+        return 0
     }
 
     private func advance() {
@@ -118,43 +104,36 @@ private struct OnboardingPageView: View {
     let page: OnboardingPage
 
     var body: some View {
-        VStack(spacing: 28) {
-            Spacer(minLength: 12)
+        VStack(spacing: 18) {
+            Spacer(minLength: 18)
 
-            visual
-                .frame(maxWidth: .infinity)
-                .frame(height: 300)
-
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 Text(page.title)
-                    .font(.system(size: 34, weight: .black, design: .rounded))
+                    .font(.system(size: 38, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .lineLimit(3)
-                    .minimumScaleFactor(0.76)
+                    .minimumScaleFactor(0.72)
 
                 Text(page.subtitle)
-                    .font(.body.weight(.medium))
+                    .font(.system(size: 20, weight: .bold, design: .rounded))
                     .foregroundStyle(.white.opacity(0.66))
                     .multilineTextAlignment(.center)
-                    .lineSpacing(3)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .lineSpacing(2)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.80)
             }
-            .padding(.horizontal, 4)
+            .padding(.horizontal, 22)
 
-            Spacer(minLength: 12)
-        }
-    }
+            Image(page.imageName)
+                .resizable()
+                .scaledToFit()
+                .frame(maxWidth: .infinity)
+                .frame(height: page.imageHeight)
+                .padding(.horizontal, page.horizontalPadding)
+                .accessibilityHidden(true)
 
-    @ViewBuilder
-    private var visual: some View {
-        switch page.visual {
-        case .swipes:
-            SwipePreviewVisual()
-        case .duplicates:
-            DuplicatePreviewVisual()
-        case .privacy:
-            PrivacyPreviewVisual()
+            Spacer(minLength: 10)
         }
     }
 }
@@ -162,205 +141,47 @@ private struct OnboardingPageView: View {
 private struct OnboardingPage {
     let title: String
     let subtitle: String
-    let visual: OnboardingVisual
+    let imageName: String
+    let imageHeight: CGFloat
+    let horizontalPadding: CGFloat
 
     static let allPages: [OnboardingPage] = [
         OnboardingPage(
-            title: "Clean your camera roll fast",
-            subtitle: "Swipe left to mark clutter. Swipe right to keep what matters.",
-            visual: .swipes
+            title: "Swipe Through Your Library",
+            subtitle: "Delete clutter on the left. Keep memories on the right.",
+            imageName: "OnboardingSwipe",
+            imageHeight: 500,
+            horizontalPadding: 0
         ),
         OnboardingPage(
-            title: "Catch duplicates and heavy clutter",
-            subtitle: "Review duplicate copies, screenshots, and videos from one focused cleanup flow.",
-            visual: .duplicates
+            title: "Free Up Space Fast",
+            subtitle: "Find photos, videos, and screenshots that are filling your iPhone.",
+            imageName: "OnboardingStorage",
+            imageHeight: 470,
+            horizontalPadding: 0
         ),
         OnboardingPage(
-            title: "Private by design",
-            subtitle: "Your library stays on your iPhone. Nothing is uploaded, and iOS asks before anything is deleted.",
-            visual: .privacy
+            title: "Delete Duplicate Photos",
+            subtitle: "Keep the best shot and clear extra copies with less effort.",
+            imageName: "OnboardingDuplicates",
+            imageHeight: 500,
+            horizontalPadding: 0
+        ),
+        OnboardingPage(
+            title: "Free Up to 200 GB",
+            subtitle: "Clean duplicate shots, old screenshots, and heavy videos taking up space.",
+            imageName: "OnboardingSavings",
+            imageHeight: 465,
+            horizontalPadding: 0
+        ),
+        OnboardingPage(
+            title: "Private by Design",
+            subtitle: "Your photos stay on your iPhone. Nothing is uploaded.",
+            imageName: "OnboardingPrivacy",
+            imageHeight: 460,
+            horizontalPadding: 0
         )
     ]
-}
-
-private enum OnboardingVisual {
-    case swipes
-    case duplicates
-    case privacy
-}
-
-private struct SwipePreviewVisual: View {
-    private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
-    private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                }
-
-            RoundedRectangle(cornerRadius: 26, style: .continuous)
-                .fill(Color(red: 0.11, green: 0.12, blue: 0.14))
-                .frame(width: 214, height: 256)
-                .rotationEffect(.degrees(-5))
-                .shadow(color: .black.opacity(0.26), radius: 18, y: 12)
-                .overlay {
-                    VStack(spacing: 0) {
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.20, green: 0.44, blue: 0.67),
-                                Color(red: 0.19, green: 0.72, blue: 0.47)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                        .frame(height: 172)
-
-                        HStack {
-                            Label("Delete", systemImage: "arrow.left")
-                                .foregroundStyle(deleteColor)
-
-                            Spacer()
-
-                            Label("Keep", systemImage: "arrow.right")
-                                .foregroundStyle(keepColor)
-                        }
-                        .font(.caption.weight(.black))
-                        .padding(14)
-                    }
-                    .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
-                }
-
-            swipePill(title: "Delete", systemImage: "minus.circle.fill", color: deleteColor)
-                .offset(x: -92, y: 86)
-
-            swipePill(title: "Keep", systemImage: "checkmark.circle.fill", color: keepColor)
-                .offset(x: 90, y: -94)
-        }
-    }
-
-    private func swipePill(title: String, systemImage: String, color: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption.weight(.black))
-            .foregroundStyle(color)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .background(Color.black.opacity(0.62), in: Capsule())
-            .overlay {
-                Capsule()
-                    .stroke(color.opacity(0.32), lineWidth: 1)
-            }
-    }
-}
-
-private struct DuplicatePreviewVisual: View {
-    private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
-    private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                }
-
-            VStack(spacing: 12) {
-                HStack(spacing: 10) {
-                    duplicateTile(color: keepColor, icon: "checkmark", label: "Keep")
-                    duplicateTile(color: deleteColor, icon: "trash", label: "Copy")
-                }
-
-                HStack(spacing: 8) {
-                    filterToken("Screens")
-                    filterToken("Videos")
-                    filterToken("Large")
-                }
-            }
-        }
-    }
-
-    private func duplicateTile(color: Color, icon: String, label: String) -> some View {
-        VStack(spacing: 12) {
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .fill(
-                    LinearGradient(
-                        colors: [color.opacity(0.90), Color.white.opacity(0.18)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-                .frame(width: 112, height: 136)
-                .overlay(alignment: .bottomTrailing) {
-                    Image(systemName: icon)
-                        .font(.system(size: 15, weight: .black))
-                        .foregroundStyle(.black)
-                        .frame(width: 32, height: 32)
-                        .background(color, in: Circle())
-                        .padding(10)
-                }
-
-            Text(label)
-                .font(.caption.weight(.black))
-                .foregroundStyle(.white)
-        }
-    }
-
-    private func filterToken(_ title: String) -> some View {
-        Text(title)
-            .font(.caption.weight(.bold))
-            .foregroundStyle(.white.opacity(0.72))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(Color.white.opacity(0.08), in: Capsule())
-    }
-}
-
-private struct PrivacyPreviewVisual: View {
-    private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
-
-    var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 28, style: .continuous)
-                .fill(Color.white.opacity(0.06))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 28, style: .continuous)
-                        .stroke(Color.white.opacity(0.10), lineWidth: 1)
-                }
-
-            VStack(spacing: 20) {
-                ZStack {
-                    Circle()
-                        .fill(keepColor.opacity(0.16))
-                        .frame(width: 124, height: 124)
-
-                    Image(systemName: "lock.shield.fill")
-                        .font(.system(size: 58, weight: .black))
-                        .foregroundStyle(keepColor)
-                }
-
-                VStack(spacing: 10) {
-                    privacyRow("On-device", icon: "iphone")
-                    privacyRow("No uploads", icon: "icloud.slash")
-                    privacyRow("Review first", icon: "checkmark.shield")
-                }
-            }
-        }
-    }
-
-    private func privacyRow(_ title: String, icon: String) -> some View {
-        Label(title, systemImage: icon)
-            .font(.subheadline.weight(.bold))
-            .foregroundStyle(.white.opacity(0.82))
-            .frame(width: 178, alignment: .leading)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-            .background(Color.black.opacity(0.36), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
 }
 
 #Preview {
