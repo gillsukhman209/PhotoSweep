@@ -108,11 +108,11 @@ struct ContentView: View {
     }
 
     private var permissionView: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "photo.on.rectangle.angled")
-                .font(.system(size: 68, weight: .semibold))
+        VStack(spacing: 26) {
+            Image(systemName: "photo.stack.fill")
+                .font(.system(size: 56, weight: .semibold))
                 .foregroundStyle(.white)
-                .frame(width: 118, height: 118)
+                .frame(width: 104, height: 104)
                 .background(
                     LinearGradient(
                         colors: [keepColor, Color(red: 0.13, green: 0.38, blue: 0.78)],
@@ -121,36 +121,44 @@ struct ContentView: View {
                     ),
                     in: RoundedRectangle(cornerRadius: 28, style: .continuous)
                 )
-                .shadow(color: keepColor.opacity(0.22), radius: 20, x: 0, y: 12)
+                .shadow(color: keepColor.opacity(0.20), radius: 20, x: 0, y: 12)
 
-            VStack(spacing: 10) {
-                Text("Clean your camera roll with swipes.")
-                    .font(.title.weight(.bold))
+            VStack(spacing: 12) {
+                Text("Allow Photo Access")
+                    .font(.system(size: 34, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
 
-                Text("Swipe left to mark photos for deletion, swipe right to keep. You review everything before iOS asks for final confirmation.")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
+                Text("PhotoSweep needs your library to find clutter and show photos for review.")
+                    .font(.headline.weight(.semibold))
+                    .foregroundStyle(.white.opacity(0.66))
                     .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .minimumScaleFactor(0.86)
             }
+
+            Label("Photos stay on your iPhone", systemImage: "lock.shield.fill")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(keepColor)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+                .background(keepColor.opacity(0.13), in: Capsule())
 
             Button {
                 library.requestAccess()
             } label: {
-                Label("Allow Photos Access", systemImage: "lock.open")
+                Text("Allow Photos")
+                    .font(.headline.weight(.black))
                     .frame(maxWidth: .infinity)
+                    .frame(height: 56)
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.large)
-
-            Text("Runs on-device. PhotoSweep does not upload your library.")
-                .font(.footnote)
-                .foregroundStyle(.white.opacity(0.58))
+            .buttonStyle(.plain)
+            .foregroundStyle(.black)
+            .background(keepColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
-            .padding(24)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color.black)
+        .padding(24)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color.black)
     }
 
     private var blockedView: some View {
