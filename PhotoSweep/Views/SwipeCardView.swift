@@ -4,6 +4,8 @@ import UIKit
 
 struct SwipeCardView: View {
     let asset: PHAsset
+    let canUndo: Bool
+    let onUndo: () -> Void
     let onKeep: () -> Void
     let onDelete: () -> Void
 
@@ -104,22 +106,44 @@ struct SwipeCardView: View {
 
     private var topMetaBar: some View {
         HStack(spacing: 10) {
-            Label(dateTimeText, systemImage: "calendar")
-                .font(.caption.weight(.black))
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .foregroundStyle(.white)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 8)
-                .background(.black.opacity(0.58), in: Capsule())
+            VStack(alignment: .leading, spacing: 8) {
+                Label(dateTimeText, systemImage: "calendar")
+                    .font(.caption.weight(.black))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 11)
+                    .padding(.vertical, 8)
+                    .background(.black.opacity(0.58), in: Capsule())
+
+                if canUndo {
+                    Button {
+                        onUndo()
+                    } label: {
+                        Label("Undo", systemImage: "arrow.uturn.backward")
+                            .font(.caption.weight(.black))
+                            .lineLimit(1)
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 8)
+                            .background(.black.opacity(0.58), in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(.white.opacity(0.14), lineWidth: 1)
+                            }
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Undo last swipe")
+                }
+            }
 
             Spacer(minLength: 8)
 
             Button {
                 showingDetails = true
             } label: {
-                Image(systemName: "eye.fill")
-                    .font(.system(size: 15, weight: .black))
+                Image(systemName: "info.circle.fill")
+                    .font(.system(size: 20, weight: .black))
                     .foregroundStyle(.white)
                     .frame(width: 38, height: 38)
                     .background(.black.opacity(0.58), in: Circle())
@@ -129,7 +153,7 @@ struct SwipeCardView: View {
                     }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("View photo details")
+            .accessibilityLabel("Photo info")
         }
         .padding(14)
         .opacity(isExiting ? 0 : 1)

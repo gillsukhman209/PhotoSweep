@@ -202,6 +202,8 @@ struct ContentView: View {
 
                     SwipeCardView(
                         asset: asset,
+                        canUndo: !library.history.isEmpty,
+                        onUndo: library.undo,
                         onKeep: library.keepCurrent,
                         onDelete: library.queueDeleteCurrent
                     )
@@ -252,19 +254,10 @@ struct ContentView: View {
     }
 
     private var topControls: some View {
-        HStack(spacing: 10) {
-            topIconButton(
-                systemImage: "arrow.uturn.backward",
-                tint: .white,
-                isEnabled: !library.history.isEmpty,
-                accessibilityLabel: "Undo"
-            ) {
-                library.undo()
-            }
-
+        HStack(spacing: 8) {
             filterMenu
 
-            Spacer()
+            Spacer(minLength: 0)
 
             Text(positionText)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
@@ -274,16 +267,32 @@ struct ContentView: View {
                 .minimumScaleFactor(0.75)
                 .accessibilityLabel("Review progress \(positionText)")
 
-            Spacer()
+            Spacer(minLength: 0)
 
             topIconButton(
-                systemImage: "square.on.square",
+                systemImage: "calendar",
+                tint: .white,
+                accessibilityLabel: "Jump to date"
+            ) {
+                showingDateJump = true
+            }
+
+            topIconButton(
+                systemImage: "rectangle.on.rectangle.angled",
                 tint: .white,
                 badge: duplicateBadge,
                 progress: library.isScanningDuplicates ? library.duplicateScanProgress : nil,
-                accessibilityLabel: "Find duplicates"
+                accessibilityLabel: "Duplicates"
             ) {
                 showingDuplicateReview = true
+            }
+
+            topIconButton(
+                systemImage: "gearshape.fill",
+                tint: .white,
+                accessibilityLabel: "Settings"
+            ) {
+                showingSettings = true
             }
 
             if library.deleteCount > 0 {
@@ -297,7 +306,7 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(height: 54)
+        .frame(height: 50)
     }
 
     private var filterMenu: some View {
@@ -310,24 +319,11 @@ struct ContentView: View {
                 }
             }
 
-            Divider()
-
-            Button {
-                showingDateJump = true
-            } label: {
-                Label("Jump to Date", systemImage: "calendar")
-            }
-
-            Button {
-                showingSettings = true
-            } label: {
-                Label("Settings", systemImage: "gearshape")
-            }
         } label: {
             ZStack(alignment: .bottomTrailing) {
-                Image(systemName: library.filter.icon)
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 52, height: 52)
+                Image(systemName: "line.3.horizontal.decrease")
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 48, height: 48)
                     .foregroundStyle(.white)
                     .background(controlFill, in: Circle())
                     .overlay {
@@ -568,8 +564,8 @@ struct ContentView: View {
         } label: {
             ZStack(alignment: .topTrailing) {
                 Image(systemName: systemImage)
-                    .font(.system(size: 18, weight: .bold))
-                    .frame(width: 52, height: 52)
+                    .font(.system(size: 17, weight: .bold))
+                    .frame(width: 48, height: 48)
                     .foregroundStyle(isEnabled ? tint : Color.white.opacity(0.22))
                     .background(controlFill.opacity(isEnabled ? 1 : 0.56), in: Circle())
                     .overlay {
@@ -582,7 +578,7 @@ struct ContentView: View {
                         .trim(from: 0, to: max(0.04, min(progress, 1)))
                         .stroke(keepColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
                         .rotationEffect(.degrees(-90))
-                        .frame(width: 52, height: 52)
+                        .frame(width: 48, height: 48)
                 }
 
                 if let badge {
