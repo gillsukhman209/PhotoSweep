@@ -1,0 +1,556 @@
+import Foundation
+import Combine
+import Photos
+import SwiftUI
+import Vision
+
+@MainActor
+final class PhotoLibraryStore: ObservableObject {
+    private let keptAssetIDsKey = "PhotoSweep.keptAssetIDs"
+    private let queuedDeleteAssetIDsKey = "PhotoSweep.queuedDeleteAssetIDs"
+
+    @Published private(set) var accessState: LibraryAccessState = .unknown
+    @Published private(set) var assets: [PHAsset] = []
+    @Published private(set) var decisions: [String: ReviewDecision] = [:]
+    @Published private(set) var history: [ReviewAction] = []
+    @Published private(set) var currentIndex = 0
+    @Published private(set) var isLoading = false
+    @Published private(set) var isDeleting = false
+    @Published private(set) var isScanningDuplicates = false
+    @Published private(set) var duplicateScanProgress = 0.0
+    @Published private(set) var duplicateGroups: [DuplicateGroup] = []
+    @Published var filter: CleanupFilter = .photos
+    @Published var message: String?
+
+    private var keptAssetIDs: Set<String>
+    private var queuedDeleteAssetIDs: Set<String>
+    private var duplicateScanTask: Task<Void, Never>?
+
+    init() {
+        keptAssetIDs = Set(UserDefaults.standard.stringArray(forKey: keptAssetIDsKey) ?? [])
+        queuedDeleteAssetIDs = Set(UserDefaults.standard.stringArray(forKey: queuedDeleteAssetIDsKey) ?? [])
+    }
+
+    var currentAsset: PHAsset? {
+        var index = currentIndex
+        while index < assets.count {
+            let asset = assets[index]
+            if decisions[asset.localIdentifier] == nil {
+                return asset
+            }
+            index += 1
+        }
+        return nil
+    }
+
+    var remainingCount: Int {
+        max(assets.count - currentIndex, 0)
+    }
+
+    var reviewedCount: Int {
+        decisions.count
+    }
+
+    var keptCount: Int {
+        decisions.values.filter { $0 == .keep }.count
+    }
+
+    var queuedDeleteAssets: [PHAsset] {
+        let queuedVisibleAssets = assets.filter { queuedDeleteAssetIDs.contains($0.localIdentifier) }
+        let visibleAssetIDs = Set(queuedVisibleAssets.map(\.localIdentifier))
+        let missingAssetIDs = queuedDeleteAssetIDs.subtracting(visibleAssetIDs)
+        guard !missingAssetIDs.isEmpty else { return queuedVisibleAssets }
+
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: Array(missingAssetIDs), options: nil)
+        var missingAssets: [PHAsset] = []
+        fetchResult.enumerateObjects { asset, _, _ in
+            missingAssets.append(asset)
+        }
+
+        return (queuedVisibleAssets + missingAssets).sorted { lhs, rhs in
+            let lhsDate = lhs.creationDate ?? .distantPast
+            let rhsDate = rhs.creationDate ?? .distantPast
+            return lhsDate > rhsDate
+        }
+    }
+
+    var deleteCount: Int {
+        queuedDeleteAssetIDs.count
+    }
+
+    var progress: Double {
+        guard !assets.isEmpty else { return 0 }
+        return Double(min(currentIndex, assets.count)) / Double(assets.count)
+    }
+
+    func upcomingAssets(limit: Int = 15) -> [PHAsset] {
+        guard limit > 0, let currentAsset else { return [] }
+        guard let startIndex = assets.firstIndex(where: { $0.localIdentifier == currentAsset.localIdentifier }) else {
+            return []
+        }
+
+        var upcoming: [PHAsset] = []
+        upcoming.reserveCapacity(limit)
+
+        for asset in assets.dropFirst(startIndex + 1) where decisions[asset.localIdentifier] == nil {
+            upcoming.append(asset)
+            if upcoming.count == limit {
+                break
+            }
+        }
+
+        return upcoming
+    }
+
+    func refreshAuthorization() {
+        accessState = LibraryAccessState(PHPhotoLibrary.authorizationStatus(for: .readWrite))
+    }
+
+    func requestAccess() {
+        PHPhotoLibrary.requestAuthorization(for: .readWrite) { [weak self] status in
+            Task { @MainActor in
+                guard let self else { return }
+                self.accessState = LibraryAccessState(status)
+                if self.accessState.canReadAndWrite {
+                    await self.loadAssets(resetSession: true)
+                }
+            }
+        }
+    }
+
+    func loadAssets(resetSession: Bool) async {
+        refreshAuthorization()
+        guard accessState.canReadAndWrite else { return }
+
+        isLoading = true
+        message = nil
+        defer { isLoading = false }
+
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = false
+        options.sortDescriptors = [
+            NSSortDescriptor(key: "creationDate", ascending: false)
+        ]
+
+        let fetchResult = PHAsset.fetchAssets(with: options)
+        var nextAssets: [PHAsset] = []
+        var seenAssetIDs = Set<String>()
+        nextAssets.reserveCapacity(fetchResult.count)
+
+        fetchResult.enumerateObjects { asset, _, _ in
+            if self.filter.includes(asset),
+               !self.keptAssetIDs.contains(asset.localIdentifier),
+               seenAssetIDs.insert(asset.localIdentifier).inserted {
+                nextAssets.append(asset)
+            }
+        }
+
+        assets = nextAssets
+
+        if resetSession {
+            currentIndex = 0
+            restoreQueuedDeleteDecisions(keepingCurrentKeeps: false)
+            history = []
+        } else {
+            restoreQueuedDeleteDecisions(keepingCurrentKeeps: true)
+            currentIndex = min(currentIndex, assets.count)
+            normalizeCurrentIndex()
+        }
+    }
+
+    func changeFilter(to newFilter: CleanupFilter) {
+        guard filter != newFilter else { return }
+        filter = newFilter
+        Task {
+            await loadAssets(resetSession: true)
+        }
+    }
+
+    func keepCurrent() {
+        decide(.keep)
+    }
+
+    func queueDeleteCurrent() {
+        guard let asset = currentAsset else { return }
+        guard asset.canPerform(.delete) else {
+            message = "This item cannot be deleted by third-party apps."
+            return
+        }
+        decide(.delete)
+    }
+
+    func keepUntil(_ target: PHAsset) {
+        guard let currentAsset else { return }
+        guard let startIndex = assets.firstIndex(where: { $0.localIdentifier == currentAsset.localIdentifier }),
+              let targetIndex = assets.firstIndex(where: { $0.localIdentifier == target.localIdentifier }),
+              targetIndex > startIndex else {
+            return
+        }
+
+        let batchID = UUID()
+        for asset in assets[startIndex..<targetIndex] where decisions[asset.localIdentifier] == nil {
+            decisions[asset.localIdentifier] = .keep
+            history.append(ReviewAction(assetID: asset.localIdentifier, decision: .keep, batchID: batchID))
+            rememberKeptAssetID(asset.localIdentifier)
+        }
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            currentIndex = targetIndex
+            normalizeCurrentIndex()
+        }
+    }
+
+    private func decide(_ decision: ReviewDecision) {
+        guard let asset = currentAsset else { return }
+        guard decisions[asset.localIdentifier] == nil else { return }
+        decisions[asset.localIdentifier] = decision
+        history.append(ReviewAction(assetID: asset.localIdentifier, decision: decision))
+        if decision == .keep {
+            rememberKeptAssetID(asset.localIdentifier)
+        } else {
+            rememberQueuedDeleteAssetID(asset.localIdentifier)
+        }
+
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+            if let assetIndex = assets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) {
+                currentIndex = min(assetIndex + 1, assets.count)
+            } else {
+                currentIndex = min(currentIndex + 1, assets.count)
+            }
+            normalizeCurrentIndex()
+        }
+    }
+
+    func undo() {
+        guard let last = history.popLast() else { return }
+        var undoneActions = [last]
+
+        if let batchID = last.batchID {
+            while let previous = history.last, previous.batchID == batchID {
+                undoneActions.append(history.removeLast())
+            }
+        }
+
+        for action in undoneActions {
+            decisions[action.assetID] = nil
+            if action.decision == .keep {
+                forgetKeptAssetID(action.assetID)
+            } else {
+                forgetQueuedDeleteAssetID(action.assetID)
+            }
+        }
+
+        let targetIndex = undoneActions
+            .compactMap { action in
+                assets.firstIndex { $0.localIdentifier == action.assetID }
+            }
+            .min()
+
+        if let targetIndex {
+            withAnimation(.spring(response: 0.32, dampingFraction: 0.86)) {
+                currentIndex = targetIndex
+            }
+        }
+    }
+
+    func removeFromDeleteQueue(_ asset: PHAsset) {
+        decisions[asset.localIdentifier] = .keep
+        history.append(ReviewAction(assetID: asset.localIdentifier, decision: .keep))
+        forgetQueuedDeleteAssetID(asset.localIdentifier)
+        rememberKeptAssetID(asset.localIdentifier)
+    }
+
+    func startDuplicateScan() {
+        guard duplicateScanTask == nil, !isScanningDuplicates else { return }
+        duplicateScanTask = Task { [weak self] in
+            await self?.scanForDuplicates()
+            await MainActor.run {
+                self?.duplicateScanTask = nil
+            }
+        }
+    }
+
+    func cancelDuplicateScan() {
+        duplicateScanTask?.cancel()
+        duplicateScanTask = nil
+        isScanningDuplicates = false
+    }
+
+    private func scanForDuplicates() async {
+        refreshAuthorization()
+        guard accessState.canReadAndWrite else { return }
+
+        isScanningDuplicates = true
+        duplicateScanProgress = 0
+        duplicateGroups = []
+        defer { isScanningDuplicates = false }
+
+        let scanAssets = fetchAllVisibleMediaAssets()
+        let buckets = Dictionary(grouping: scanAssets) { asset in
+            duplicateBucketKey(for: asset)
+        }
+        let candidateBuckets = buckets.values.filter { $0.count > 1 }
+        let totalCandidates = max(candidateBuckets.reduce(0) { $0 + $1.count }, 1)
+        var processed = 0
+
+        for bucket in candidateBuckets.sorted(by: { $0.count > $1.count }) {
+            var featurePrints: [(asset: PHAsset, print: VNFeaturePrintObservation)] = []
+            for asset in bucket {
+                if Task.isCancelled { return }
+                if let featurePrint = await featurePrint(for: asset) {
+                    featurePrints.append((asset, featurePrint))
+                }
+
+                processed += 1
+                duplicateScanProgress = Double(processed) / Double(totalCandidates)
+                await Task.yield()
+            }
+
+            let newGroups = duplicateGroups(from: featurePrints)
+            if !newGroups.isEmpty {
+                duplicateGroups = (duplicateGroups + newGroups)
+                    .filter { $0.assets.count > 1 }
+                    .sorted { lhs, rhs in
+                        lhs.duplicateCount > rhs.duplicateCount
+                    }
+            }
+            await Task.yield()
+        }
+
+        duplicateScanProgress = 1
+    }
+
+    func markDuplicateExtrasForDeletion(in group: DuplicateGroup) {
+        if decisions[group.keeper.localIdentifier] == nil {
+            decisions[group.keeper.localIdentifier] = .keep
+            history.append(ReviewAction(assetID: group.keeper.localIdentifier, decision: .keep))
+            rememberKeptAssetID(group.keeper.localIdentifier)
+        }
+
+        for asset in group.duplicates where asset.canPerform(.delete) {
+            decisions[asset.localIdentifier] = .delete
+            history.append(ReviewAction(assetID: asset.localIdentifier, decision: .delete))
+            rememberQueuedDeleteAssetID(asset.localIdentifier)
+        }
+
+        normalizeCurrentIndex()
+    }
+
+    func markAllDuplicateExtrasForDeletion() {
+        for group in duplicateGroups {
+            markDuplicateExtrasForDeletion(in: group)
+        }
+    }
+
+    func restartSession() {
+        restoreQueuedDeleteDecisions(keepingCurrentKeeps: false)
+        history = []
+        currentIndex = 0
+        normalizeCurrentIndex()
+        message = nil
+    }
+
+    func deleteQueuedAssets() async {
+        let targets = queuedDeleteAssets
+        guard !targets.isEmpty else { return }
+
+        isDeleting = true
+        message = nil
+        defer { isDeleting = false }
+
+        do {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                PHPhotoLibrary.shared().performChanges {
+                    PHAssetChangeRequest.deleteAssets(targets as NSArray)
+                } completionHandler: { success, error in
+                    if let error {
+                        continuation.resume(throwing: error)
+                    } else if success {
+                        continuation.resume()
+                    } else {
+                        continuation.resume(throwing: PhotoSweepError.deleteFailed)
+                    }
+                }
+            }
+
+            message = "Deleted \(targets.count) item\(targets.count == 1 ? "" : "s"). Empty Recently Deleted in Photos to reclaim storage immediately."
+            targets.forEach { forgetQueuedDeleteAssetID($0.localIdentifier) }
+            decisions = decisions.filter { _, decision in decision != .delete }
+            await loadAssets(resetSession: false)
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
+    private func normalizeCurrentIndex() {
+        while currentIndex < assets.count, decisions[assets[currentIndex].localIdentifier] != nil {
+            currentIndex += 1
+        }
+    }
+
+    private func restoreQueuedDeleteDecisions(keepingCurrentKeeps: Bool) {
+        decisions = keepingCurrentKeeps ? decisions.filter { _, decision in decision == .keep } : [:]
+        for asset in assets where queuedDeleteAssetIDs.contains(asset.localIdentifier) {
+            decisions[asset.localIdentifier] = .delete
+        }
+    }
+
+    private func rememberKeptAssetID(_ assetID: String) {
+        guard keptAssetIDs.insert(assetID).inserted else { return }
+        saveKeptAssetIDs()
+    }
+
+    private func forgetKeptAssetID(_ assetID: String) {
+        guard keptAssetIDs.remove(assetID) != nil else { return }
+        saveKeptAssetIDs()
+    }
+
+    private func saveKeptAssetIDs() {
+        UserDefaults.standard.set(Array(keptAssetIDs), forKey: keptAssetIDsKey)
+    }
+
+    private func rememberQueuedDeleteAssetID(_ assetID: String) {
+        guard queuedDeleteAssetIDs.insert(assetID).inserted else { return }
+        saveQueuedDeleteAssetIDs()
+    }
+
+    private func forgetQueuedDeleteAssetID(_ assetID: String) {
+        guard queuedDeleteAssetIDs.remove(assetID) != nil else { return }
+        saveQueuedDeleteAssetIDs()
+    }
+
+    private func saveQueuedDeleteAssetIDs() {
+        UserDefaults.standard.set(Array(queuedDeleteAssetIDs), forKey: queuedDeleteAssetIDsKey)
+    }
+
+    private func fetchAllVisibleMediaAssets() -> [PHAsset] {
+        let options = PHFetchOptions()
+        options.includeHiddenAssets = false
+        options.sortDescriptors = [
+            NSSortDescriptor(key: "creationDate", ascending: false)
+        ]
+
+        let fetchResult = PHAsset.fetchAssets(with: options)
+        var fetchedAssets: [PHAsset] = []
+        var seenAssetIDs = Set<String>()
+        fetchedAssets.reserveCapacity(fetchResult.count)
+
+        fetchResult.enumerateObjects { asset, _, _ in
+            guard asset.mediaType == .image || asset.mediaType == .video else { return }
+            guard !self.keptAssetIDs.contains(asset.localIdentifier) else { return }
+            guard seenAssetIDs.insert(asset.localIdentifier).inserted else { return }
+            fetchedAssets.append(asset)
+        }
+
+        return fetchedAssets
+    }
+
+    private func duplicateBucketKey(for asset: PHAsset) -> String {
+        let shortSide = min(asset.pixelWidth, asset.pixelHeight)
+        let longSide = max(asset.pixelWidth, asset.pixelHeight)
+
+        if asset.mediaType == .video {
+            let durationBucket = Int(asset.duration.rounded())
+            return "video-\(shortSide)x\(longSide)-\(durationBucket)"
+        }
+
+        return "image-\(shortSide)x\(longSide)"
+    }
+
+    private func duplicateGroups(
+        from featurePrints: [(asset: PHAsset, print: VNFeaturePrintObservation)]
+    ) -> [DuplicateGroup] {
+        var clusters: [[(asset: PHAsset, print: VNFeaturePrintObservation)]] = []
+        let threshold: Float = 0.22
+
+        for candidate in featurePrints {
+            var matchedIndex: Int?
+
+            for index in clusters.indices {
+                guard let representative = clusters[index].first else { continue }
+                var distance: Float = .greatestFiniteMagnitude
+                try? candidate.print.computeDistance(&distance, to: representative.print)
+
+                if distance <= threshold {
+                    matchedIndex = index
+                    break
+                }
+            }
+
+            if let matchedIndex {
+                clusters[matchedIndex].append(candidate)
+            } else {
+                clusters.append([candidate])
+            }
+        }
+
+        return clusters
+            .filter { $0.count > 1 }
+            .map { cluster in
+                DuplicateGroup(assets: sortedDuplicateAssets(cluster.map(\.asset)))
+            }
+    }
+
+    private func sortedDuplicateAssets(_ assets: [PHAsset]) -> [PHAsset] {
+        assets.sorted { lhs, rhs in
+            if lhs.isFavorite != rhs.isFavorite {
+                return lhs.isFavorite
+            }
+
+            let lhsDate = lhs.creationDate ?? .distantFuture
+            let rhsDate = rhs.creationDate ?? .distantFuture
+            return lhsDate < rhsDate
+        }
+    }
+
+    private func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
+        guard let image = await thumbnail(for: asset), let cgImage = image.cgImage else {
+            return nil
+        }
+
+        return await Task.detached(priority: .utility) {
+            let request = VNGenerateImageFeaturePrintRequest()
+            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
+
+            do {
+                try handler.perform([request])
+                return request.results?.first as? VNFeaturePrintObservation
+            } catch {
+                return nil
+            }
+        }.value
+    }
+
+    private func thumbnail(for asset: PHAsset) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            let options = PHImageRequestOptions()
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .fast
+            options.isNetworkAccessAllowed = true
+
+            var didResume = false
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: CGSize(width: 180, height: 180),
+                contentMode: .aspectFill,
+                options: options
+            ) { image, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
+                guard !isDegraded, !didResume else { return }
+                didResume = true
+                continuation.resume(returning: image)
+            }
+        }
+    }
+}
+
+enum PhotoSweepError: LocalizedError {
+    case deleteFailed
+
+    var errorDescription: String? {
+        switch self {
+        case .deleteFailed:
+            return "Photos did not complete the delete request."
+        }
+    }
+}
