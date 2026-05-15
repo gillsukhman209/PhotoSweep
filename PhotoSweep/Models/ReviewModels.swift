@@ -77,6 +77,21 @@ struct DuplicateGroup: Identifiable {
     }
 }
 
+struct PhotoMonth: Identifiable, Equatable {
+    let startDate: Date
+    let count: Int
+
+    var id: Date { startDate }
+
+    var title: String {
+        startDate.formatted(.dateTime.month(.wide).year())
+    }
+
+    var subtitle: String {
+        "\(count) item\(count == 1 ? "" : "s")"
+    }
+}
+
 enum LibraryAccessState: Equatable {
     case unknown
     case notDetermined

@@ -5,9 +5,11 @@ import UIKit
 struct ContentView: View {
     @EnvironmentObject private var library: PhotoLibraryStore
     @StateObject private var tiltController = TiltDecisionController()
+    @AppStorage("PhotoSweep.hasCompletedOnboarding") private var hasCompletedOnboarding = false
     @AppStorage("PhotoSweep.tiltToSwipeEnabled") private var tiltToSwipeEnabled = false
     @State private var showingDeleteReview = false
     @State private var showingDuplicateReview = false
+    @State private var showingDateJump = false
     @State private var showingSettings = false
     @State private var tiltFeedback: TiltDirection?
 
@@ -18,13 +20,19 @@ struct ContentView: View {
     var body: some View {
         NavigationStack {
             Group {
-                switch library.accessState {
-                case .unknown, .notDetermined:
-                    permissionView
-                case .denied, .restricted:
-                    blockedView
-                case .authorized, .limited:
-                    reviewView
+                if !hasCompletedOnboarding {
+                    OnboardingView {
+                        hasCompletedOnboarding = true
+                    }
+                } else {
+                    switch library.accessState {
+                    case .unknown, .notDetermined:
+                        permissionView
+                    case .denied, .restricted:
+                        blockedView
+                    case .authorized, .limited:
+                        reviewView
+                    }
                 }
             }
             .navigationTitle("PhotoSweep")
@@ -58,14 +66,29 @@ struct ContentView: View {
                 DuplicateReviewView()
                     .environmentObject(library)
             }
+            .sheet(isPresented: $showingDateJump) {
+                DateJumpView()
+                    .environmentObject(library)
+                    .preferredColorScheme(.dark)
+            }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(tiltToSwipeEnabled: $tiltToSwipeEnabled)
                     .preferredColorScheme(.dark)
             }
             .task {
+                guard hasCompletedOnboarding else { return }
                 library.refreshAuthorization()
                 if library.accessState.canReadAndWrite && library.assets.isEmpty {
                     await library.loadAssets(resetSession: true)
+                }
+            }
+            .onChange(of: hasCompletedOnboarding) {
+                guard hasCompletedOnboarding else { return }
+                library.refreshAuthorization()
+                if library.accessState.canReadAndWrite && library.assets.isEmpty {
+                    Task {
+                        await library.loadAssets(resetSession: true)
+                    }
                 }
             }
             .alert("PhotoSweep", isPresented: Binding(
@@ -203,6 +226,9 @@ struct ContentView: View {
         .onChange(of: showingSettings) {
             updateTiltMonitoring()
         }
+        .onChange(of: showingDateJump) {
+            updateTiltMonitoring()
+        }
     }
 
     private var topControls: some View {
@@ -265,6 +291,12 @@ struct ContentView: View {
             }
 
             Divider()
+
+            Button {
+                showingDateJump = true
+            } label: {
+                Label("Jump to Date", systemImage: "calendar")
+            }
 
             Button {
                 showingSettings = true
@@ -412,6 +444,7 @@ struct ContentView: View {
             library.currentAsset != nil &&
             !showingDeleteReview &&
             !showingDuplicateReview &&
+            !showingDateJump &&
             !showingSettings
     }
 

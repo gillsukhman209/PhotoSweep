@@ -9,6 +9,14 @@ struct SwipeCardView: View {
 
     @State private var offset: CGSize = .zero
     @State private var isExiting = false
+    @State private var showingDetails = false
+    @State private var zoomScale: CGFloat = 1
+    @State private var lastZoomScale: CGFloat = 1
+    @State private var imageOffset: CGSize = .zero
+    @State private var lastImageOffset: CGSize = .zero
+
+    private let minimumZoomScale: CGFloat = 1
+    private let maximumZoomScale: CGFloat = 4
 
     private var rotation: Angle {
         .degrees(Double(offset.width / 32))
@@ -26,16 +34,14 @@ struct SwipeCardView: View {
         asset.mediaSubtypes.contains(.photoScreenshot)
     }
 
-    var body: some View {
-        ZStack(alignment: .top) {
-            ZStack {
-                if isScreenshot {
-                    screenshotBackdrop
-                }
+    private var isZoomed: Bool {
+        zoomScale > 1.01
+    }
 
-                AssetImageView(asset: asset, contentMode: .fit)
-                    .padding(isScreenshot ? 18 : 0)
-            }
+    var body: some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .top) {
+                imageLayer
                 .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 18, style: .continuous)
@@ -60,38 +66,73 @@ struct SwipeCardView: View {
                 .overlay(alignment: .bottomLeading) {
                     assetMeta
                 }
+                .overlay(alignment: .top) {
+                    topMetaBar
+                }
                 .scaleEffect(isExiting ? 0.94 : 1)
                 .shadow(color: .black.opacity(0.34), radius: 14, x: 0, y: 9)
+            }
+            .contentShape(Rectangle())
+            .offset(offset)
+            .rotationEffect(isZoomed ? .zero : rotation)
+            .gesture(dragGesture(in: proxy.size))
+            .simultaneousGesture(zoomGesture(in: proxy.size))
+            .onTapGesture(count: 2) {
+                toggleZoom(in: proxy.size)
+            }
         }
-        .contentShape(Rectangle())
-        .offset(offset)
-        .rotationEffect(rotation)
-        .gesture(
-            DragGesture()
-                .onChanged { value in
-                    guard !isExiting else { return }
-                    offset = CGSize(
-                        width: value.translation.width,
-                        height: value.translation.height * 0.28
-                    )
-                }
-                .onEnded { value in
-                    guard !isExiting else { return }
-                    let threshold: CGFloat = 118
-                    let predictedWidth = value.predictedEndTranslation.width
-                    if value.translation.width <= -threshold || predictedWidth <= -220 {
-                        animateOut(direction: -1, completion: onDelete)
-                    } else if value.translation.width >= threshold || predictedWidth >= 220 {
-                        animateOut(direction: 1, completion: onKeep)
-                    } else {
-                        withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
-                            offset = .zero
-                        }
-                    }
-                }
-        )
+        .sheet(isPresented: $showingDetails) {
+            AssetDetailsView(asset: asset)
+                .preferredColorScheme(.dark)
+        }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Current photo")
+    }
+
+    private var imageLayer: some View {
+        ZStack {
+            if isScreenshot {
+                screenshotBackdrop
+            }
+
+            AssetImageView(asset: asset, contentMode: .fit)
+                .padding(isScreenshot ? 18 : 0)
+                .scaleEffect(zoomScale)
+                .offset(imageOffset)
+        }
+    }
+
+    private var topMetaBar: some View {
+        HStack(spacing: 10) {
+            Label(dateTimeText, systemImage: "calendar")
+                .font(.caption.weight(.black))
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+                .foregroundStyle(.white)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(.black.opacity(0.58), in: Capsule())
+
+            Spacer(minLength: 8)
+
+            Button {
+                showingDetails = true
+            } label: {
+                Image(systemName: "eye.fill")
+                    .font(.system(size: 15, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 38, height: 38)
+                    .background(.black.opacity(0.58), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.14), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("View photo details")
+        }
+        .padding(14)
+        .opacity(isExiting ? 0 : 1)
     }
 
     @ViewBuilder
@@ -125,6 +166,11 @@ struct SwipeCardView: View {
         return date.formatted(date: .abbreviated, time: .omitted)
     }
 
+    private var dateTimeText: String {
+        guard let date = asset.creationDate else { return "No Date" }
+        return date.formatted(.dateTime.month(.abbreviated).day().year().hour().minute())
+    }
+
     private var durationText: String {
         let total = Int(asset.duration.rounded())
         let minutes = total / 60
@@ -156,6 +202,116 @@ struct SwipeCardView: View {
             .padding(18)
             .opacity(opacity)
             .scaleEffect(0.92 + (opacity * 0.08))
+    }
+
+    private func dragGesture(in size: CGSize) -> some Gesture {
+        DragGesture()
+            .onChanged { value in
+                guard !isExiting else { return }
+
+                if isZoomed {
+                    let proposedOffset = CGSize(
+                        width: lastImageOffset.width + value.translation.width,
+                        height: lastImageOffset.height + value.translation.height
+                    )
+                    imageOffset = clampedImageOffset(proposedOffset, in: size)
+                } else {
+                    offset = CGSize(
+                        width: value.translation.width,
+                        height: value.translation.height * 0.28
+                    )
+                }
+            }
+            .onEnded { value in
+                guard !isExiting else { return }
+
+                if isZoomed {
+                    lastImageOffset = clampedImageOffset(imageOffset, in: size)
+                    imageOffset = lastImageOffset
+                    return
+                }
+
+                let threshold: CGFloat = 118
+                let predictedWidth = value.predictedEndTranslation.width
+                if value.translation.width <= -threshold || predictedWidth <= -220 {
+                    animateOut(direction: -1, completion: onDelete)
+                } else if value.translation.width >= threshold || predictedWidth >= 220 {
+                    animateOut(direction: 1, completion: onKeep)
+                } else {
+                    withAnimation(.spring(response: 0.34, dampingFraction: 0.78)) {
+                        offset = .zero
+                    }
+                }
+            }
+    }
+
+    private func zoomGesture(in size: CGSize) -> some Gesture {
+        MagnificationGesture()
+            .onChanged { value in
+                guard !isExiting else { return }
+                zoomScale = clampedZoomScale(lastZoomScale * value)
+                imageOffset = clampedImageOffset(imageOffset, in: size)
+            }
+            .onEnded { value in
+                guard !isExiting else { return }
+                zoomScale = clampedZoomScale(lastZoomScale * value)
+                lastZoomScale = zoomScale
+
+                if !isZoomed {
+                    resetZoom(animated: true)
+                } else {
+                    lastImageOffset = clampedImageOffset(imageOffset, in: size)
+                    imageOffset = lastImageOffset
+                }
+            }
+    }
+
+    private func toggleZoom(in size: CGSize) {
+        guard !isExiting else { return }
+
+        if isZoomed {
+            resetZoom(animated: true)
+        } else {
+            withAnimation(.snappy(duration: 0.22)) {
+                zoomScale = 2.25
+                lastZoomScale = zoomScale
+                imageOffset = clampedImageOffset(.zero, in: size)
+                lastImageOffset = imageOffset
+            }
+        }
+    }
+
+    private func resetZoom(animated: Bool) {
+        let updates = {
+            zoomScale = minimumZoomScale
+            lastZoomScale = minimumZoomScale
+            imageOffset = .zero
+            lastImageOffset = .zero
+        }
+
+        if animated {
+            withAnimation(.snappy(duration: 0.22)) {
+                updates()
+            }
+        } else {
+            updates()
+        }
+    }
+
+    private func clampedZoomScale(_ scale: CGFloat) -> CGFloat {
+        min(max(scale, minimumZoomScale), maximumZoomScale)
+    }
+
+    private func clampedImageOffset(_ offset: CGSize, in size: CGSize) -> CGSize {
+        guard zoomScale > minimumZoomScale else { return .zero }
+
+        let maximumX = max((size.width * (zoomScale - 1)) / 2, 0)
+        let maximumY = max((size.height * (zoomScale - 1)) / 2, 0)
+
+        return CGSize(
+            width: min(max(offset.width, -maximumX), maximumX),
+            height: min(max(offset.height, -maximumY), maximumY)
+        )
     }
 
     private func animateOut(direction: CGFloat, completion: @escaping () -> Void) {

@@ -83,6 +83,28 @@ final class PhotoLibraryStore: ObservableObject {
         return Double(min(currentIndex, assets.count)) / Double(assets.count)
     }
 
+    var dateJumpRange: ClosedRange<Date>? {
+        let dates = assets.compactMap(\.creationDate)
+        guard let oldest = dates.min(), let newest = dates.max() else { return nil }
+        return oldest...newest
+    }
+
+    var reviewMonths: [PhotoMonth] {
+        let calendar = Calendar.current
+        var countsByMonth: [Date: Int] = [:]
+
+        for asset in assets where decisions[asset.localIdentifier] == nil {
+            guard let creationDate = asset.creationDate else { continue }
+            let components = calendar.dateComponents([.year, .month], from: creationDate)
+            guard let monthStart = calendar.date(from: components) else { continue }
+            countsByMonth[monthStart, default: 0] += 1
+        }
+
+        return countsByMonth
+            .map { PhotoMonth(startDate: $0.key, count: $0.value) }
+            .sorted { $0.startDate > $1.startDate }
+    }
+
     func upcomingAssets(limit: Int = 15) -> [PHAsset] {
         guard limit > 0, let currentAsset else { return [] }
         guard let startIndex = assets.firstIndex(where: { $0.localIdentifier == currentAsset.localIdentifier }) else {
@@ -200,6 +222,34 @@ final class PhotoLibraryStore: ObservableObject {
         }
     }
 
+    func jumpToDate(_ date: Date) {
+        let calendar = Calendar.current
+        let dayStart = calendar.startOfDay(for: date)
+        let dayEnd = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: dayStart) ?? date
+
+        if jump(toFirstAssetBetween: dayStart...dayEnd) {
+            return
+        }
+
+        if jump(toFirstAsset: dayEnd) {
+            message = "No unreviewed items on that date. Jumped to the next older item."
+        } else {
+            message = "No unreviewed items found on or before that date."
+        }
+    }
+
+    func jumpToMonth(_ month: PhotoMonth) {
+        let calendar = Calendar.current
+        guard let monthEnd = calendar.date(byAdding: DateComponents(month: 1, second: -1), to: month.startDate) else {
+            jumpToDate(month.startDate)
+            return
+        }
+
+        if !jump(toFirstAssetBetween: month.startDate...monthEnd) {
+            message = "No unreviewed items left in \(month.title)."
+        }
+    }
+
     private func decide(_ decision: ReviewDecision) {
         guard let asset = currentAsset else { return }
         guard decisions[asset.localIdentifier] == nil else { return }
@@ -219,6 +269,44 @@ final class PhotoLibraryStore: ObservableObject {
             }
             normalizeCurrentIndex()
         }
+    }
+
+    private func jump(toFirstAssetBetween range: ClosedRange<Date>) -> Bool {
+        guard let targetIndex = assets.firstIndex(where: { asset in
+            guard decisions[asset.localIdentifier] == nil,
+                  let creationDate = asset.creationDate else {
+                return false
+            }
+
+            return range.contains(creationDate)
+        }) else {
+            return false
+        }
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            currentIndex = targetIndex
+            normalizeCurrentIndex()
+        }
+        return true
+    }
+
+    private func jump(toFirstAsset onOrBeforeDate: Date) -> Bool {
+        guard let targetIndex = assets.firstIndex(where: { asset in
+            guard decisions[asset.localIdentifier] == nil,
+                  let creationDate = asset.creationDate else {
+                return false
+            }
+
+            return creationDate <= onOrBeforeDate
+        }) else {
+            return false
+        }
+
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.88)) {
+            currentIndex = targetIndex
+            normalizeCurrentIndex()
+        }
+        return true
     }
 
     func undo() {
