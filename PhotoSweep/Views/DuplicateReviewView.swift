@@ -28,16 +28,6 @@ struct DuplicateReviewView: View {
                         dismiss()
                     }
                 }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    if !library.duplicateGroups.isEmpty {
-                        Button("Delete Copies") {
-                            library.markAllDuplicateExtrasForDeletion()
-                        }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(deleteColor)
-                    }
-                }
             }
         }
         .preferredColorScheme(.dark)
@@ -123,7 +113,7 @@ struct DuplicateReviewView: View {
                         .font(.title2.weight(.bold))
                         .foregroundStyle(.white)
 
-                    Text("Keep one. Delete the extra copies. Nothing is deleted until Review Deletes.")
+                    Text("Keeps one photo in each set. Duplicates are sent to Review Deletes first.")
                         .font(.subheadline)
                         .foregroundStyle(.white.opacity(0.62))
                 }
@@ -144,7 +134,7 @@ struct DuplicateReviewView: View {
             Button {
                 library.markAllDuplicateExtrasForDeletion()
             } label: {
-                Label("Delete All Extra Copies", systemImage: "trash.fill")
+                Label("Delete All Duplicates", systemImage: "trash.fill")
                     .frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
@@ -184,34 +174,46 @@ struct DuplicateReviewView: View {
 
         return VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
-                Text("\(group.assets.count) copies found")
+                Text("\(group.assets.count) copies")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(.white)
 
                 Spacer()
 
-                Button {
-                    library.markDuplicateExtrasForDeletion(in: group)
-                } label: {
-                    Text(isQueued ? "Ready" : "Delete copies")
-                        .font(.subheadline.weight(.bold))
-                        .foregroundStyle(isQueued ? keepColor : deleteColor)
+                if isQueued {
+                    Text("Added")
+                        .font(.caption.weight(.black))
+                        .foregroundStyle(.black)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(keepColor, in: Capsule())
+                } else {
+                    Button {
+                        library.markDuplicateExtrasForDeletion(in: group)
+                    } label: {
+                        Text("Delete Duplicates")
+                            .font(.caption.weight(.black))
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 7)
+                            .background(deleteColor, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
                 }
-                .disabled(isQueued)
             }
 
             HStack(spacing: 10) {
-                duplicateTile(group.keeper, label: "Keep this", color: keepColor)
+                duplicateTile(group.keeper, label: "Keep", color: keepColor)
                     .frame(maxWidth: .infinity)
 
                 ForEach(group.duplicates.prefix(2), id: \.localIdentifier) { asset in
-                    duplicateTile(asset, label: "Delete copy", color: deleteColor)
+                    duplicateTile(asset, label: "Duplicate", color: Color.white.opacity(0.18))
                         .frame(maxWidth: .infinity)
                 }
             }
 
             if group.duplicates.count > 2 {
-                Text("+\(group.duplicates.count - 2) more duplicate\(group.duplicates.count - 2 == 1 ? "" : "s") will be deleted")
+                Text("+\(group.duplicates.count - 2) more duplicate \(group.duplicates.count - 2 == 1 ? "copy" : "copies") in this set")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.58))
             }
@@ -233,11 +235,12 @@ struct DuplicateReviewView: View {
 
             Text(label)
                 .font(.caption.weight(.black))
-                .foregroundStyle(label == "Keep this" ? .black : .white)
+                .foregroundStyle(label == "Keep" ? .black : .white)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(color, in: Capsule())
                 .padding(7)
         }
     }
+
 }

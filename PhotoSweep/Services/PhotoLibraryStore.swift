@@ -2,12 +2,13 @@ import Foundation
 import Combine
 import Photos
 import SwiftUI
-import Vision
+import UIKit
 
 @MainActor
 final class PhotoLibraryStore: ObservableObject {
     private let keptAssetIDsKey = "PhotoSweep.keptAssetIDs"
     private let queuedDeleteAssetIDsKey = "PhotoSweep.queuedDeleteAssetIDs"
+    private let duplicateHashCacheKey = "PhotoSweep.duplicateHashCache.v1"
 
     @Published private(set) var accessState: LibraryAccessState = .unknown
     @Published private(set) var assets: [PHAsset] = []
@@ -24,11 +25,13 @@ final class PhotoLibraryStore: ObservableObject {
 
     private var keptAssetIDs: Set<String>
     private var queuedDeleteAssetIDs: Set<String>
+    private var duplicateHashCache: [String: UInt64]
     private var duplicateScanTask: Task<Void, Never>?
 
     init() {
         keptAssetIDs = Set(UserDefaults.standard.stringArray(forKey: keptAssetIDsKey) ?? [])
         queuedDeleteAssetIDs = Set(UserDefaults.standard.stringArray(forKey: queuedDeleteAssetIDsKey) ?? [])
+        duplicateHashCache = Self.loadDuplicateHashCache(from: duplicateHashCacheKey)
     }
 
     var currentAsset: PHAsset? {
@@ -381,25 +384,44 @@ final class PhotoLibraryStore: ObservableObject {
         let totalCandidates = max(candidateBuckets.reduce(0) { $0 + $1.count }, 1)
         var processed = 0
 
+        var unsavedHashCount = 0
+        var allGroups: [DuplicateGroup] = []
+        var lastPublish = Date.distantPast
+
         for bucket in candidateBuckets.sorted(by: { $0.count > $1.count }) {
-            var featurePrints: [(asset: PHAsset, print: VNFeaturePrintObservation)] = []
-            for startIndex in stride(from: 0, to: bucket.count, by: 6) {
+            var hashes: [(asset: PHAsset, hash: UInt64)] = []
+            hashes.reserveCapacity(bucket.count)
+
+            for startIndex in stride(from: 0, to: bucket.count, by: 12) {
                 if Task.isCancelled { return }
 
-                let batch = Array(bucket[startIndex..<min(startIndex + 6, bucket.count)])
-                let batchPrints = await withTaskGroup(
-                    of: (PHAsset, VNFeaturePrintObservation)?.self,
-                    returning: [(asset: PHAsset, print: VNFeaturePrintObservation)].self
+                let batch = Array(bucket[startIndex..<min(startIndex + 12, bucket.count)])
+                var uncachedAssets: [PHAsset] = []
+                uncachedAssets.reserveCapacity(batch.count)
+
+                for asset in batch {
+                    let cacheKey = duplicateHashCacheKey(for: asset)
+                    if let cachedHash = duplicateHashCache[cacheKey] {
+                        hashes.append((asset, cachedHash))
+                    } else {
+                        uncachedAssets.append(asset)
+                    }
+                }
+
+                let batchHashes = await withTaskGroup(
+                    of: (String, PHAsset, UInt64)?.self,
+                    returning: [(cacheKey: String, asset: PHAsset, hash: UInt64)].self
                 ) { group in
-                    for asset in batch {
+                    for asset in uncachedAssets {
+                        let cacheKey = duplicateHashCacheKey(for: asset)
                         group.addTask {
                             if Task.isCancelled { return nil }
-                            guard let featurePrint = await self.featurePrint(for: asset) else { return nil }
-                            return (asset, featurePrint)
+                            guard let hash = await Self.perceptualHash(for: asset) else { return nil }
+                            return (cacheKey, asset, hash)
                         }
                     }
 
-                    var results: [(asset: PHAsset, print: VNFeaturePrintObservation)] = []
+                    var results: [(cacheKey: String, asset: PHAsset, hash: UInt64)] = []
                     for await result in group {
                         if let result {
                             results.append(result)
@@ -408,23 +430,42 @@ final class PhotoLibraryStore: ObservableObject {
                     return results
                 }
 
-                featurePrints.append(contentsOf: batchPrints)
+                for result in batchHashes {
+                    duplicateHashCache[result.cacheKey] = result.hash
+                    hashes.append((result.asset, result.hash))
+                    unsavedHashCount += 1
+                }
+
+                if unsavedHashCount >= 250 {
+                    saveDuplicateHashCache()
+                    unsavedHashCount = 0
+                }
+
                 processed += batch.count
                 duplicateScanProgress = Double(processed) / Double(totalCandidates)
                 await Task.yield()
             }
 
-            let newGroups = duplicateGroups(from: featurePrints)
+            let newGroups = duplicateGroups(from: hashes)
             if !newGroups.isEmpty {
-                duplicateGroups = (duplicateGroups + newGroups)
+                allGroups = (allGroups + newGroups)
                     .filter { $0.assets.count > 1 }
                     .sorted { lhs, rhs in
                         lhs.duplicateCount > rhs.duplicateCount
                     }
+
+                if Date().timeIntervalSince(lastPublish) > 0.35 {
+                    duplicateGroups = allGroups
+                    lastPublish = Date()
+                }
             }
             await Task.yield()
         }
 
+        if unsavedHashCount > 0 {
+            saveDuplicateHashCache()
+        }
+        duplicateGroups = allGroups
         duplicateScanProgress = 1
     }
 
@@ -556,7 +597,7 @@ final class PhotoLibraryStore: ObservableObject {
     private func duplicateBucketKey(for asset: PHAsset) -> String {
         let shortSide = min(asset.pixelWidth, asset.pixelHeight)
         let longSide = max(asset.pixelWidth, asset.pixelHeight)
-        let dateBucket = Int((asset.creationDate?.timeIntervalSince1970 ?? 0) / 120)
+        let dateBucket = Int((asset.creationDate?.timeIntervalSince1970 ?? 0) / 86_400)
 
         if asset.mediaType == .video {
             let durationBucket = Int(asset.duration.rounded())
@@ -567,18 +608,17 @@ final class PhotoLibraryStore: ObservableObject {
     }
 
     private func duplicateGroups(
-        from featurePrints: [(asset: PHAsset, print: VNFeaturePrintObservation)]
+        from hashes: [(asset: PHAsset, hash: UInt64)]
     ) -> [DuplicateGroup] {
-        var clusters: [[(asset: PHAsset, print: VNFeaturePrintObservation)]] = []
-        let threshold: Float = 0.22
+        var clusters: [[(asset: PHAsset, hash: UInt64)]] = []
+        let threshold = 4
 
-        for candidate in featurePrints {
+        for candidate in hashes {
             var matchedIndex: Int?
 
             for index in clusters.indices {
                 guard let representative = clusters[index].first else { continue }
-                var distance: Float = .greatestFiniteMagnitude
-                try? candidate.print.computeDistance(&distance, to: representative.print)
+                let distance = Self.hammingDistance(candidate.hash, representative.hash)
 
                 if distance <= threshold {
                     matchedIndex = index
@@ -612,25 +652,36 @@ final class PhotoLibraryStore: ObservableObject {
         }
     }
 
-    private nonisolated func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
-        guard let image = await thumbnail(for: asset), let cgImage = image.cgImage else {
-            return nil
+    private func duplicateHashCacheKey(for asset: PHAsset) -> String {
+        let duration = Int(asset.duration.rounded())
+        return "\(asset.localIdentifier)|\(asset.mediaType.rawValue)|\(asset.pixelWidth)x\(asset.pixelHeight)|\(duration)"
+    }
+
+    private func saveDuplicateHashCache() {
+        let encoded = duplicateHashCache.mapValues { String($0) }
+        UserDefaults.standard.set(encoded, forKey: duplicateHashCacheKey)
+    }
+
+    private static func loadDuplicateHashCache(from key: String) -> [String: UInt64] {
+        guard let encoded = UserDefaults.standard.dictionary(forKey: key) as? [String: String] else {
+            return [:]
         }
 
-        return await Task.detached(priority: .utility) {
-            let request = VNGenerateImageFeaturePrintRequest()
-            let handler = VNImageRequestHandler(cgImage: cgImage, options: [:])
-
-            do {
-                try handler.perform([request])
-                return request.results?.first as? VNFeaturePrintObservation
-            } catch {
-                return nil
+        return encoded.reduce(into: [:]) { result, item in
+            if let value = UInt64(item.value) {
+                result[item.key] = value
             }
+        }
+    }
+
+    private nonisolated static func perceptualHash(for asset: PHAsset) async -> UInt64? {
+        guard let image = await thumbnail(for: asset) else { return nil }
+        return await Task.detached(priority: .utility) {
+            differenceHash(from: image)
         }.value
     }
 
-    private nonisolated func thumbnail(for asset: PHAsset) async -> UIImage? {
+    private nonisolated static func thumbnail(for asset: PHAsset) async -> UIImage? {
         await withCheckedContinuation { continuation in
             let options = PHImageRequestOptions()
             options.deliveryMode = .fastFormat
@@ -640,7 +691,7 @@ final class PhotoLibraryStore: ObservableObject {
             var didResume = false
             PHImageManager.default().requestImage(
                 for: asset,
-                targetSize: CGSize(width: 96, height: 96),
+                targetSize: CGSize(width: 72, height: 72),
                 contentMode: .aspectFill,
                 options: options
             ) { image, info in
@@ -660,6 +711,48 @@ final class PhotoLibraryStore: ObservableObject {
                 }
             }
         }
+    }
+
+    private nonisolated static func differenceHash(from image: UIImage) -> UInt64? {
+        guard let cgImage = image.cgImage else { return nil }
+
+        let width = 9
+        let height = 8
+        var pixels = [UInt8](repeating: 0, count: width * height)
+
+        guard let context = CGContext(
+            data: &pixels,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width,
+            space: CGColorSpaceCreateDeviceGray(),
+            bitmapInfo: CGImageAlphaInfo.none.rawValue
+        ) else {
+            return nil
+        }
+
+        context.interpolationQuality = .low
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+
+        var hash: UInt64 = 0
+        var bit = 0
+        for y in 0..<height {
+            for x in 0..<(width - 1) {
+                let left = pixels[(y * width) + x]
+                let right = pixels[(y * width) + x + 1]
+                if left > right {
+                    hash |= UInt64(1) << UInt64(bit)
+                }
+                bit += 1
+            }
+        }
+
+        return hash
+    }
+
+    private nonisolated static func hammingDistance(_ lhs: UInt64, _ rhs: UInt64) -> Int {
+        (lhs ^ rhs).nonzeroBitCount
     }
 }
 
