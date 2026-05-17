@@ -31,10 +31,16 @@ enum SuperwallBootstrap {
         }
 
         guard configure(), Superwall.isInitialized else {
+            AnalyticsService.track("paywall_unavailable", properties: [
+                "placement": placement
+            ])
             runFeature()
             return
         }
 
+        AnalyticsService.track("paywall_requested", properties: [
+            "placement": placement
+        ])
         Superwall.shared.register(placement: placement) {
             runFeature()
         }
@@ -85,6 +91,9 @@ enum SuperwallBootstrap {
         }
 
         guard configure(), Superwall.isInitialized else {
+            AnalyticsService.track("paywall_unavailable", properties: [
+                "placement": placement
+            ])
             finish()
             return
         }
@@ -95,9 +104,15 @@ enum SuperwallBootstrap {
         }
 
         let handler = PaywallPresentationHandler()
+        handler.onPresent { info in
+            AnalyticsService.track("paywall_shown", properties: paywallProperties(placement: placement, info: info))
+        }
         handler.onDismiss { _, result in
             switch result {
             case .purchased, .restored:
+                AnalyticsService.track(result == .restored ? "paywall_restored" : "paywall_purchased", properties: [
+                    "placement": placement
+                ])
                 unlockIfSubscribed()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     unlockIfSubscribed()
@@ -106,16 +121,31 @@ enum SuperwallBootstrap {
                     finish()
                 }
             case .declined:
+                AnalyticsService.track("paywall_dismissed", properties: [
+                    "placement": placement,
+                    "result": "declined"
+                ])
                 finish()
             }
         }
-        handler.onSkip { _ in
+        handler.onSkip { reason in
+            AnalyticsService.track("paywall_skipped", properties: [
+                "placement": placement,
+                "reason": String(describing: reason)
+            ])
             finish()
         }
-        handler.onError { _ in
+        handler.onError { error in
+            AnalyticsService.track("paywall_error", properties: [
+                "placement": placement,
+                "error": String(describing: error)
+            ])
             finish()
         }
 
+        AnalyticsService.track("paywall_requested", properties: [
+            "placement": placement
+        ])
         Superwall.shared.register(
             placement: placement,
             params: params,
@@ -123,5 +153,14 @@ enum SuperwallBootstrap {
         ) {
             runFeatureIfSubscribedOrFinish()
         }
+    }
+
+    private static func paywallProperties(placement: String, info: PaywallInfo) -> [String: Any] {
+        [
+            "placement": placement,
+            "paywall_identifier": info.identifier,
+            "paywall_name": info.name,
+            "presented_by": info.presentedBy
+        ]
     }
 }

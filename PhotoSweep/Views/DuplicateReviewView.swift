@@ -134,6 +134,10 @@ struct DuplicateReviewView: View {
         .safeAreaInset(edge: .bottom) {
             Button {
                 SuperwallBootstrap.register(placement: "delete_all_duplicates") {
+                    AnalyticsService.track("duplicate_all_deleted", properties: [
+                        "duplicate_group_count": library.duplicateGroups.count,
+                        "duplicate_asset_count": library.duplicateGroups.reduce(0) { $0 + $1.duplicateCount }
+                    ])
                     library.markAllDuplicateExtrasForDeletion()
                 }
             } label: {
@@ -193,6 +197,10 @@ struct DuplicateReviewView: View {
                 } else {
                     Button {
                         SuperwallBootstrap.register(placement: "delete_duplicate_set") {
+                            AnalyticsService.track("duplicate_set_deleted", properties: [
+                                "copy_count": group.assets.count,
+                                "duplicate_asset_count": group.duplicateCount
+                            ])
                             library.markDuplicateExtrasForDeletion(in: group)
                         }
                     } label: {

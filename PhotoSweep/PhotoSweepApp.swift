@@ -6,6 +6,7 @@ struct PhotoSweepApp: App {
     @StateObject private var library = PhotoLibraryStore()
 
     init() {
+        AnalyticsService.configure()
         SuperwallBootstrap.configure()
     }
 

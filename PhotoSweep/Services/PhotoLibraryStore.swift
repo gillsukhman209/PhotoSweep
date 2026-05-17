@@ -136,6 +136,9 @@ final class PhotoLibraryStore: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.accessState = LibraryAccessState(status)
+                AnalyticsService.track("photos_permission_result", properties: [
+                    "status": self.accessState.analyticsValue
+                ])
                 if self.accessState.canReadAndWrite {
                     await self.loadAssets(resetSession: true)
                 }
@@ -171,6 +174,11 @@ final class PhotoLibraryStore: ObservableObject {
         }
 
         assets = nextAssets
+        AnalyticsService.track("library_loaded", properties: [
+            "asset_count": nextAssets.count,
+            "filter": filter.rawValue,
+            "reset_session": resetSession
+        ])
 
         if resetSession {
             currentIndex = 0
@@ -185,6 +193,10 @@ final class PhotoLibraryStore: ObservableObject {
 
     func changeFilter(to newFilter: CleanupFilter) {
         guard filter != newFilter else { return }
+        AnalyticsService.track("filter_changed", properties: [
+            "from_filter": filter.rawValue,
+            "to_filter": newFilter.rawValue
+        ])
         filter = newFilter
         Task {
             await loadAssets(resetSession: true)
@@ -231,12 +243,21 @@ final class PhotoLibraryStore: ObservableObject {
         let dayEnd = calendar.date(byAdding: DateComponents(day: 1, second: -1), to: dayStart) ?? date
 
         if jump(toFirstAssetBetween: dayStart...dayEnd) {
+            AnalyticsService.track("date_jump_selected", properties: [
+                "result": "exact_day"
+            ])
             return
         }
 
         if jump(toFirstAsset: dayEnd) {
+            AnalyticsService.track("date_jump_selected", properties: [
+                "result": "older_item"
+            ])
             message = "No unreviewed items on that date. Jumped to the next older item."
         } else {
+            AnalyticsService.track("date_jump_selected", properties: [
+                "result": "not_found"
+            ])
             message = "No unreviewed items found on or before that date."
         }
     }
@@ -249,7 +270,16 @@ final class PhotoLibraryStore: ObservableObject {
         }
 
         if !jump(toFirstAssetBetween: month.startDate...monthEnd) {
+            AnalyticsService.track("month_jump_selected", properties: [
+                "result": "not_found",
+                "month_item_count": month.count
+            ])
             message = "No unreviewed items left in \(month.title)."
+        } else {
+            AnalyticsService.track("month_jump_selected", properties: [
+                "result": "found",
+                "month_item_count": month.count
+            ])
         }
     }
 
@@ -353,6 +383,9 @@ final class PhotoLibraryStore: ObservableObject {
 
     func startDuplicateScan() {
         guard duplicateScanTask == nil, !isScanningDuplicates else { return }
+        AnalyticsService.track("duplicates_scan_started", properties: [
+            "asset_count": assets.count
+        ])
         duplicateScanTask = Task { [weak self] in
             await self?.scanForDuplicates()
             await MainActor.run {
@@ -365,12 +398,17 @@ final class PhotoLibraryStore: ObservableObject {
         duplicateScanTask?.cancel()
         duplicateScanTask = nil
         isScanningDuplicates = false
+        AnalyticsService.track("duplicates_scan_cancelled", properties: [
+            "progress": duplicateScanProgress,
+            "duplicate_group_count": duplicateGroups.count
+        ])
     }
 
     private func scanForDuplicates() async {
         refreshAuthorization()
         guard accessState.canReadAndWrite else { return }
 
+        let startedAt = Date()
         isScanningDuplicates = true
         duplicateScanProgress = 0
         duplicateGroups = []
@@ -467,6 +505,11 @@ final class PhotoLibraryStore: ObservableObject {
         }
         duplicateGroups = allGroups
         duplicateScanProgress = 1
+        AnalyticsService.track("duplicates_scan_completed", properties: [
+            "duration_seconds": Date().timeIntervalSince(startedAt),
+            "duplicate_group_count": allGroups.count,
+            "duplicate_asset_count": allGroups.reduce(0) { $0 + $1.duplicateCount }
+        ])
     }
 
     func markDuplicateExtrasForDeletion(in group: DuplicateGroup) {
@@ -502,6 +545,7 @@ final class PhotoLibraryStore: ObservableObject {
     func deleteQueuedAssets() async {
         let targets = queuedDeleteAssets
         guard !targets.isEmpty else { return }
+        let requestedDeleteCount = targets.count
 
         isDeleting = true
         message = nil
@@ -523,10 +567,17 @@ final class PhotoLibraryStore: ObservableObject {
             }
 
             message = "Deleted \(targets.count) item\(targets.count == 1 ? "" : "s"). Empty Recently Deleted in Photos to reclaim storage immediately."
+            AnalyticsService.track("queued_delete_completed", properties: [
+                "item_count": requestedDeleteCount
+            ])
             targets.forEach { forgetQueuedDeleteAssetID($0.localIdentifier) }
             decisions = decisions.filter { _, decision in decision != .delete }
             await loadAssets(resetSession: false)
         } catch {
+            AnalyticsService.track("queued_delete_failed", properties: [
+                "item_count": requestedDeleteCount,
+                "error": String(describing: error)
+            ])
             message = error.localizedDescription
         }
     }

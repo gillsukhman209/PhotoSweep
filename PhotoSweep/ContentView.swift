@@ -26,6 +26,7 @@ struct ContentView: View {
                 if !hasCompletedOnboarding {
                     OnboardingView {
                         hasCompletedOnboarding = true
+                        AnalyticsService.track("onboarding_finished")
                     }
                 } else {
                     switch library.accessState {
@@ -148,6 +149,7 @@ struct ContentView: View {
                 .background(keepColor.opacity(0.13), in: Capsule())
 
             Button {
+                AnalyticsService.track("photos_permission_requested")
                 library.requestAccess()
             } label: {
                 Text("Allow Photos")
@@ -207,8 +209,8 @@ struct ContentView: View {
                         asset: asset,
                         canUndo: !library.history.isEmpty,
                         onUndo: library.undo,
-                        onKeep: { performSwipeDecision(library.keepCurrent) },
-                        onDelete: { performSwipeDecision(library.queueDeleteCurrent) }
+                        onKeep: { performSwipeDecision(decision: .keep, source: "card_swipe", library.keepCurrent) },
+                        onDelete: { performSwipeDecision(decision: .delete, source: "card_swipe", library.queueDeleteCurrent) }
                     )
                     .id(asset.localIdentifier)
                     .frame(maxWidth: .infinity)
@@ -277,6 +279,7 @@ struct ContentView: View {
                 tint: .white,
                 accessibilityLabel: "Jump to date"
             ) {
+                AnalyticsService.track("date_jump_opened")
                 showingDateJump = true
             }
 
@@ -287,6 +290,10 @@ struct ContentView: View {
                 progress: library.isScanningDuplicates ? library.duplicateScanProgress : nil,
                 accessibilityLabel: "Duplicates"
             ) {
+                AnalyticsService.track("duplicates_opened", properties: [
+                    "duplicate_group_count": library.duplicateGroups.count,
+                    "is_scanning": library.isScanningDuplicates
+                ])
                 showingDuplicateReview = true
             }
 
@@ -295,6 +302,7 @@ struct ContentView: View {
                 tint: .white,
                 accessibilityLabel: "Settings"
             ) {
+                AnalyticsService.track("settings_opened")
                 showingSettings = true
             }
 
@@ -305,6 +313,9 @@ struct ContentView: View {
                     badge: deleteBadge,
                     accessibilityLabel: "Review marked photos"
                 ) {
+                    AnalyticsService.track("delete_review_opened", properties: [
+                        "queued_delete_count": library.deleteCount
+                    ])
                     showingDeleteReview = true
                 }
             }
@@ -316,6 +327,10 @@ struct ContentView: View {
         Menu {
             ForEach(CleanupFilter.allCases) { filter in
                 Button {
+                    AnalyticsService.track("filter_selected", properties: [
+                        "filter": filter.rawValue,
+                        "previous_filter": library.filter.rawValue
+                    ])
                     library.changeFilter(to: filter)
                 } label: {
                     Label(filter.title, systemImage: filter.icon)
@@ -419,7 +434,7 @@ struct ContentView: View {
                         ForEach(Array(upcoming.enumerated()), id: \.element.localIdentifier) { offset, asset in
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                performSwipeDecision(count: offset + 1) {
+                                performSwipeDecision(count: offset + 1, decision: .keep, source: "quick_skip") {
                                     library.keepUntil(asset)
                                 }
                             } label: {
@@ -448,7 +463,7 @@ struct ContentView: View {
                 color: deleteColor
             ) {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                performSwipeDecision(library.queueDeleteCurrent)
+                performSwipeDecision(decision: .delete, source: "button", library.queueDeleteCurrent)
             }
             .accessibilityHint("Marks this photo for deletion.")
 
@@ -458,7 +473,7 @@ struct ContentView: View {
                 color: keepColor
             ) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                performSwipeDecision(library.keepCurrent)
+                performSwipeDecision(decision: .keep, source: "button", library.keepCurrent)
             }
             .accessibilityHint("Keeps this photo and moves to the next one.")
         }
@@ -505,9 +520,9 @@ struct ContentView: View {
 
                 switch direction {
                 case .left:
-                    performSwipeDecision(library.queueDeleteCurrent)
+                    performSwipeDecision(decision: .delete, source: "tilt", library.queueDeleteCurrent)
                 case .right:
-                    performSwipeDecision(library.keepCurrent)
+                    performSwipeDecision(decision: .keep, source: "tilt", library.keepCurrent)
                 }
 
                 showTiltFeedback(direction)
@@ -528,6 +543,8 @@ struct ContentView: View {
 
     private func performSwipeDecision(
         count: Int = 1,
+        decision reviewDecision: ReviewDecision,
+        source: String,
         _ action: @escaping () -> Void
     ) {
         let decision = {
@@ -537,17 +554,26 @@ struct ContentView: View {
 
             if SuperwallBootstrap.hasActiveSubscription {
                 action()
+                trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, subscriber: true)
                 return
             }
 
             if DailySwipeGate.canUseFreeSwipes(currentCount: dailySwipeCount, requestedCount: count) {
                 dailySwipeCount += count
                 action()
+                trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, subscriber: false)
                 return
             }
 
             guard !isPresentingSwipePaywall else { return }
             isPresentingSwipePaywall = true
+            AnalyticsService.track("free_swipe_limit_reached", properties: [
+                "daily_swipe_count": dailySwipeCount,
+                "requested_swipe_count": count,
+                "free_swipe_limit": DailySwipeGate.freeSwipeLimit,
+                "source": source,
+                "decision": reviewDecision.rawValue
+            ])
 
             SuperwallBootstrap.requireActiveSubscription(
                 placement: "photo_sweep",
@@ -561,6 +587,7 @@ struct ContentView: View {
                 }
             ) {
                 action()
+                trackSwipeDecision(reviewDecision, source: source, count: count, gated: true, subscriber: true)
             }
         }
 
@@ -571,6 +598,25 @@ struct ContentView: View {
                 decision()
             }
         }
+    }
+
+    private func trackSwipeDecision(
+        _ decision: ReviewDecision,
+        source: String,
+        count: Int,
+        gated: Bool,
+        subscriber: Bool
+    ) {
+        AnalyticsService.track("photo_swiped_\(decision.rawValue)", properties: [
+            "decision": decision.rawValue,
+            "source": source,
+            "swipe_count": count,
+            "filter": library.filter.rawValue,
+            "daily_swipe_count": dailySwipeCount,
+            "free_swipe_limit": DailySwipeGate.freeSwipeLimit,
+            "was_paywall_gated": gated,
+            "subscriber": subscriber
+        ])
     }
 
     private func resetDailySwipeCountIfNeeded() {

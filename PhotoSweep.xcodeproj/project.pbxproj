@@ -7,7 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		B20000000000000000000001 /* SuperwallKit in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000003 /* SuperwallKit */; };
+	B20000000000000000000001 /* SuperwallKit in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000003 /* SuperwallKit */; };
+	B30000000000000000000001 /* PostHog in Frameworks */ = {isa = PBXBuildFile; productRef = B30000000000000000000003 /* PostHog */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				B20000000000000000000001 /* SuperwallKit in Frameworks */,
+				B30000000000000000000001 /* PostHog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -71,6 +73,7 @@
 			name = PhotoSweep;
 			packageProductDependencies = (
 				B20000000000000000000003 /* SuperwallKit */,
+				B30000000000000000000003 /* PostHog */,
 			);
 			productName = PhotoSweep;
 			productReference = A10000000000000000000009 /* PhotoSweep.app */;
@@ -102,6 +105,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				B20000000000000000000002 /* XCRemoteSwiftPackageReference "Superwall-iOS" */,
+				B30000000000000000000002 /* XCRemoteSwiftPackageReference "posthog-ios" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000008 /* Products */;
@@ -269,6 +273,8 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "PhotoSweep needs access to your photo library so you can privately review photos and delete the ones you choose.";
 				INFOPLIST_KEY_PHPhotoLibraryPreventAutomaticLimitedAccessAlert = YES;
+				INFOPLIST_KEY_POSTHOG_HOST = "https://us.i.posthog.com";
+				INFOPLIST_KEY_POSTHOG_PROJECT_TOKEN = phc_swDDmppzfnSKMexbTqiKNWyXG2L4kPRRvKyD2o6mEaz4;
 				INFOPLIST_KEY_SUPERWALL_PUBLIC_API_KEY = pk_ShVl3C2UpBwMOhrhtMSbu;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -306,6 +312,8 @@
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "PhotoSweep needs access to your photo library so you can privately review photos and delete the ones you choose.";
 				INFOPLIST_KEY_PHPhotoLibraryPreventAutomaticLimitedAccessAlert = YES;
+				INFOPLIST_KEY_POSTHOG_HOST = "https://us.i.posthog.com";
+				INFOPLIST_KEY_POSTHOG_PROJECT_TOKEN = phc_swDDmppzfnSKMexbTqiKNWyXG2L4kPRRvKyD2o6mEaz4;
 				INFOPLIST_KEY_SUPERWALL_PUBLIC_API_KEY = pk_ShVl3C2UpBwMOhrhtMSbu;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -361,6 +369,14 @@
 				minimumVersion = 4.0.0;
 			};
 		};
+		B30000000000000000000002 /* XCRemoteSwiftPackageReference "posthog-ios" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/PostHog/posthog-ios";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 3.9.1;
+			};
+		};
 /* End XCRemoteSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -368,6 +384,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = B20000000000000000000002 /* XCRemoteSwiftPackageReference "Superwall-iOS" */;
 			productName = SuperwallKit;
+		};
+		B30000000000000000000003 /* PostHog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B30000000000000000000002 /* XCRemoteSwiftPackageReference "posthog-ios" */;
+			productName = PostHog;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

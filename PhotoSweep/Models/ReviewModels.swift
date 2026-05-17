@@ -120,4 +120,15 @@ enum LibraryAccessState: Equatable {
     var canReadAndWrite: Bool {
         self == .authorized || self == .limited
     }
+
+    var analyticsValue: String {
+        switch self {
+        case .unknown: "unknown"
+        case .notDetermined: "not_determined"
+        case .authorized: "authorized"
+        case .limited: "limited"
+        case .denied: "denied"
+        case .restricted: "restricted"
+        }
+    }
 }

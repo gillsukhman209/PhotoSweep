@@ -4,6 +4,7 @@ struct OnboardingView: View {
     let onComplete: () -> Void
 
     @State private var selectedPage = 0
+    @State private var hasTrackedStart = false
 
     private let pages = OnboardingPage.allPages
     private let accent = Color(red: 0.30, green: 0.36, blue: 1.0)
@@ -29,6 +30,11 @@ struct OnboardingView: View {
                 .padding(.bottom, 18)
         }
         .background(background.ignoresSafeArea())
+        .onAppear {
+            guard !hasTrackedStart else { return }
+            hasTrackedStart = true
+            AnalyticsService.track("onboarding_started")
+        }
     }
 
     private var progressBars: some View {
@@ -72,6 +78,10 @@ struct OnboardingView: View {
             .buttonStyle(.plain)
 
             Button {
+                AnalyticsService.track("onboarding_skipped", properties: [
+                    "page_index": selectedPage,
+                    "page_count": pages.count
+                ])
                 onComplete()
             } label: {
                 Text("Skip")
@@ -102,8 +112,15 @@ struct OnboardingView: View {
 
     private func advance() {
         if selectedPage == pages.count - 1 {
+            AnalyticsService.track("onboarding_completed", properties: [
+                "page_count": pages.count
+            ])
             onComplete()
         } else {
+            AnalyticsService.track("onboarding_step_advanced", properties: [
+                "from_page_index": selectedPage,
+                "to_page_index": selectedPage + 1
+            ])
             withAnimation(.snappy(duration: 0.28)) {
                 selectedPage += 1
             }
