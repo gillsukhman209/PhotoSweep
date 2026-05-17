@@ -1,4 +1,5 @@
 import Photos
+import SuperwallKit
 import SwiftUI
 
 struct DuplicateReviewView: View {
@@ -132,7 +133,9 @@ struct DuplicateReviewView: View {
         }
         .safeAreaInset(edge: .bottom) {
             Button {
-                library.markAllDuplicateExtrasForDeletion()
+                SuperwallBootstrap.register(placement: "delete_all_duplicates") {
+                    library.markAllDuplicateExtrasForDeletion()
+                }
             } label: {
                 Label("Delete All Duplicates", systemImage: "trash.fill")
                     .frame(maxWidth: .infinity)
@@ -189,7 +192,9 @@ struct DuplicateReviewView: View {
                         .background(keepColor, in: Capsule())
                 } else {
                     Button {
-                        library.markDuplicateExtrasForDeletion(in: group)
+                        SuperwallBootstrap.register(placement: "delete_duplicate_set") {
+                            library.markDuplicateExtrasForDeletion(in: group)
+                        }
                     } label: {
                         Text("Delete Duplicates")
                             .font(.caption.weight(.black))

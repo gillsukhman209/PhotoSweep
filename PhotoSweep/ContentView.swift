@@ -7,11 +7,14 @@ struct ContentView: View {
     @StateObject private var tiltController = TiltDecisionController()
     @AppStorage("PhotoSweep.hasCompletedOnboarding.v2") private var hasCompletedOnboarding = false
     @AppStorage("PhotoSweep.tiltToSwipeEnabled") private var tiltToSwipeEnabled = false
+    @AppStorage("PhotoSweep.dailySwipeCount") private var dailySwipeCount = 0
+    @AppStorage("PhotoSweep.dailySwipeDate") private var dailySwipeDate = ""
     @State private var showingDeleteReview = false
     @State private var showingDuplicateReview = false
     @State private var showingDateJump = false
     @State private var showingSettings = false
     @State private var tiltFeedback: TiltDirection?
+    @State private var isPresentingSwipePaywall = false
 
     private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
     private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
@@ -204,8 +207,8 @@ struct ContentView: View {
                         asset: asset,
                         canUndo: !library.history.isEmpty,
                         onUndo: library.undo,
-                        onKeep: library.keepCurrent,
-                        onDelete: library.queueDeleteCurrent
+                        onKeep: { performSwipeDecision(library.keepCurrent) },
+                        onDelete: { performSwipeDecision(library.queueDeleteCurrent) }
                     )
                     .id(asset.localIdentifier)
                     .frame(maxWidth: .infinity)
@@ -416,7 +419,9 @@ struct ContentView: View {
                         ForEach(Array(upcoming.enumerated()), id: \.element.localIdentifier) { offset, asset in
                             Button {
                                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                library.keepUntil(asset)
+                                performSwipeDecision(count: offset + 1) {
+                                    library.keepUntil(asset)
+                                }
                             } label: {
                                 QuickSkipThumbnail(asset: asset, step: offset + 1)
                             }
@@ -443,7 +448,7 @@ struct ContentView: View {
                 color: deleteColor
             ) {
                 UIImpactFeedbackGenerator(style: .medium).impactOccurred()
-                library.queueDeleteCurrent()
+                performSwipeDecision(library.queueDeleteCurrent)
             }
             .accessibilityHint("Marks this photo for deletion.")
 
@@ -453,7 +458,7 @@ struct ContentView: View {
                 color: keepColor
             ) {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                library.keepCurrent()
+                performSwipeDecision(library.keepCurrent)
             }
             .accessibilityHint("Keeps this photo and moves to the next one.")
         }
@@ -495,16 +500,18 @@ struct ContentView: View {
         }
 
         tiltController.start { direction in
-            guard tiltMonitoringAllowed else { return }
+            DispatchQueue.main.async {
+                guard tiltMonitoringAllowed else { return }
 
-            switch direction {
-            case .left:
-                library.queueDeleteCurrent()
-            case .right:
-                library.keepCurrent()
+                switch direction {
+                case .left:
+                    performSwipeDecision(library.queueDeleteCurrent)
+                case .right:
+                    performSwipeDecision(library.keepCurrent)
+                }
+
+                showTiltFeedback(direction)
             }
-
-            showTiltFeedback(direction)
         }
     }
 
@@ -517,6 +524,62 @@ struct ContentView: View {
                 tiltFeedback = nil
             }
         }
+    }
+
+    private func performSwipeDecision(
+        count: Int = 1,
+        _ action: @escaping () -> Void
+    ) {
+        let decision = {
+            guard count > 0 else { return }
+
+            resetDailySwipeCountIfNeeded()
+
+            if SuperwallBootstrap.hasActiveSubscription {
+                action()
+                return
+            }
+
+            if DailySwipeGate.canUseFreeSwipes(currentCount: dailySwipeCount, requestedCount: count) {
+                dailySwipeCount += count
+                action()
+                return
+            }
+
+            guard !isPresentingSwipePaywall else { return }
+            isPresentingSwipePaywall = true
+
+            SuperwallBootstrap.requireActiveSubscription(
+                placement: "photo_sweep",
+                params: [
+                    "daily_swipe_count": dailySwipeCount,
+                    "requested_swipe_count": count,
+                    "free_swipe_limit": DailySwipeGate.freeSwipeLimit
+                ],
+                onComplete: {
+                    isPresentingSwipePaywall = false
+                }
+            ) {
+                action()
+            }
+        }
+
+        if Thread.isMainThread {
+            decision()
+        } else {
+            DispatchQueue.main.async {
+                decision()
+            }
+        }
+    }
+
+    private func resetDailySwipeCountIfNeeded() {
+        let normalized = DailySwipeGate.normalizedCount(
+            storedCount: dailySwipeCount,
+            storedDay: dailySwipeDate
+        )
+        dailySwipeDate = normalized.day
+        dailySwipeCount = normalized.count
     }
 
     private func preheatUpcomingImages() {
@@ -746,6 +809,20 @@ private struct SettingsView: View {
                     }
                 } footer: {
                     Text("Use this while testing the onboarding flow.")
+                }
+
+                Section {
+                    Link(destination: LegalLinks.privacyPolicy) {
+                        Label("Privacy Policy", systemImage: "hand.raised.fill")
+                    }
+
+                    Link(destination: LegalLinks.termsOfUse) {
+                        Label("Terms of Use", systemImage: "doc.text.fill")
+                    }
+                } header: {
+                    Text("Legal")
+                } footer: {
+                    Text("Subscriptions use Apple's Standard End User License Agreement.")
                 }
             }
             .scrollContentBackground(.hidden)

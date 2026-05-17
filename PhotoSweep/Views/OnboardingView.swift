@@ -80,6 +80,17 @@ struct OnboardingView: View {
                     .frame(height: 28)
             }
             .buttonStyle(.plain)
+
+            HStack(spacing: 8) {
+                Link("Privacy Policy", destination: LegalLinks.privacyPolicy)
+
+                Text("•")
+                    .foregroundStyle(.white.opacity(0.28))
+
+                Link("Terms of Use", destination: LegalLinks.termsOfUse)
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(.white.opacity(0.48))
         }
     }
 
