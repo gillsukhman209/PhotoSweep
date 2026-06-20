@@ -4,6 +4,7 @@ import SwiftUI
 
 struct AssetDetailsView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     let asset: PHAsset
 
@@ -14,6 +15,18 @@ struct AssetDetailsView: View {
         self.asset = asset
         rows = AssetDetailsView.assetRows(for: asset)
         resourceRows = AssetDetailsView.resourceRows(for: asset)
+    }
+
+    private var backgroundColor: Color {
+        colorScheme == .dark ? .black : Color(uiColor: .systemGroupedBackground)
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white : Color(red: 0.07, green: 0.08, blue: 0.10)
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? Color.white.opacity(0.58) : Color(red: 0.36, green: 0.38, blue: 0.44)
     }
 
     var body: some View {
@@ -40,7 +53,7 @@ struct AssetDetailsView: View {
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color.black)
+            .background(backgroundColor)
             .navigationTitle("Details")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -60,17 +73,17 @@ struct AssetDetailsView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
                 .overlay {
                     RoundedRectangle(cornerRadius: 16, style: .continuous)
-                        .stroke(Color.white.opacity(0.12), lineWidth: 1)
+                        .stroke(colorScheme == .dark ? Color.white.opacity(0.12) : Color.black.opacity(0.08), lineWidth: 1)
                 }
 
             VStack(alignment: .leading, spacing: 6) {
                 Text(primaryTitle)
                     .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(primaryText)
 
                 Text(primarySubtitle)
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(secondaryText)
                     .lineLimit(2)
             }
 
@@ -90,14 +103,14 @@ struct AssetDetailsView: View {
         HStack(alignment: .firstTextBaseline, spacing: 14) {
             Label(row.title, systemImage: row.icon)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(secondaryText)
                 .frame(width: 116, alignment: .leading)
 
             Spacer(minLength: 8)
 
             Text(row.value)
                 .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.white)
+                .foregroundStyle(primaryText)
                 .multilineTextAlignment(.trailing)
                 .textSelection(.enabled)
         }
@@ -290,5 +303,4 @@ private struct AssetDetailRow: Identifiable {
 
 #Preview {
     AssetDetailsView(asset: PHAsset())
-        .preferredColorScheme(.dark)
 }

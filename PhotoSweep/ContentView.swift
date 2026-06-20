@@ -2,23 +2,205 @@ import Photos
 import SwiftUI
 import UIKit
 
+private enum MainTutorialStep: Equatable {
+    case swipe
+    case deleteReview
+    case filter
+    case calendar
+    case duplicates
+
+    var title: String {
+        switch self {
+        case .swipe:
+            return "Mark one photo"
+        case .deleteReview:
+            return "Deletes need one last step"
+        case .filter:
+            return "Choose what to review"
+        case .calendar:
+            return "Jump to any date"
+        case .duplicates:
+            return "Find duplicates"
+        }
+    }
+
+    var subtitle: String {
+        switch self {
+        case .swipe:
+            return "Swipe left or tap Delete to mark a photo. Nothing is deleted yet."
+        case .deleteReview:
+            return "The trash button opens Review Deletes. Photos are only removed after you tap Delete there."
+        case .filter:
+            return "Use Filter to switch between photos, videos, screenshots, and other cleanup views."
+        case .calendar:
+            return "Use Calendar when you want to jump back to a specific month or trip."
+        case .duplicates:
+            return "Tap the stacked-squares button to review duplicate photos and keep the best one."
+        }
+    }
+
+    var buttonTitle: String {
+        switch self {
+        case .swipe:
+            return ""
+        case .deleteReview, .filter, .calendar:
+            return "Next"
+        case .duplicates:
+            return "Got it"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .swipe:
+            return "hand.draw.fill"
+        case .deleteReview:
+            return "trash.fill"
+        case .filter:
+            return "line.3.horizontal.decrease"
+        case .calendar:
+            return "calendar"
+        case .duplicates:
+            return "rectangle.on.rectangle.angled"
+        }
+    }
+
+    var tint: Color {
+        switch self {
+        case .swipe:
+            return Color(red: 1.0, green: 0.32, blue: 0.36)
+        case .filter, .calendar, .duplicates:
+            return Color(red: 0.18, green: 0.78, blue: 0.49)
+        case .deleteReview:
+            return Color(red: 1.0, green: 0.32, blue: 0.36)
+        }
+    }
+
+    var spotlightCornerRadius: CGFloat {
+        switch self {
+        case .swipe:
+            return 0
+        case .deleteReview, .filter, .calendar, .duplicates:
+            return 32
+        }
+    }
+
+    var arrowImageName: String {
+        switch self {
+        case .swipe:
+            return "arrow.left"
+        case .filter:
+            return "arrow.up.left"
+        case .calendar:
+            return "arrow.up"
+        case .duplicates:
+            return "arrow.up"
+        case .deleteReview:
+            return "arrow.up.right"
+        }
+    }
+
+    func spotlightFrame(in size: CGSize) -> CGRect {
+        switch self {
+        case .swipe:
+            return .zero
+        case .filter:
+            return CGRect(
+                x: 14,
+                y: 8,
+                width: 58,
+                height: 58
+            )
+        case .calendar:
+            return CGRect(
+                x: max(18, size.width - 230),
+                y: 10,
+                width: 58,
+                height: 58
+            )
+        case .duplicates:
+            return CGRect(
+                x: max(18, size.width - 174),
+                y: 10,
+                width: 58,
+                height: 58
+            )
+        case .deleteReview:
+            return CGRect(
+                x: max(18, size.width - 68),
+                y: 10,
+                width: 58,
+                height: 58
+            )
+        }
+    }
+
+    func arrowPosition(in size: CGSize) -> CGPoint {
+        switch self {
+        case .swipe:
+            return CGPoint(x: size.width / 2, y: max(120, size.height * 0.26))
+        case .filter:
+            return CGPoint(x: 74, y: 88)
+        case .calendar:
+            return CGPoint(x: max(82, size.width - 201), y: 88)
+        case .duplicates:
+            return CGPoint(x: max(82, size.width - 145), y: 88)
+        case .deleteReview:
+            return CGPoint(x: max(80, size.width - 66), y: 88)
+        }
+    }
+
+    func cardPosition(in size: CGSize) -> CGPoint {
+        switch self {
+        case .swipe:
+            return CGPoint(x: size.width / 2, y: min(size.height - 150, max(170, size.height * 0.24)))
+        case .deleteReview, .filter, .calendar, .duplicates:
+            return CGPoint(x: size.width / 2, y: min(size.height - 130, 190))
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject private var library: PhotoLibraryStore
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var tiltController = TiltDecisionController()
     @AppStorage("PhotoSweep.hasCompletedOnboarding.v2") private var hasCompletedOnboarding = false
+    @AppStorage("PhotoSweep.hasSeenMainTutorial.v1") private var hasSeenMainTutorial = false
     @AppStorage("PhotoSweep.tiltToSwipeEnabled") private var tiltToSwipeEnabled = false
-    @AppStorage("PhotoSweep.dailySwipeCount") private var dailySwipeCount = 0
-    @AppStorage("PhotoSweep.dailySwipeDate") private var dailySwipeDate = ""
+    @AppStorage("PhotoSweep.dailySwipeCount") private var freeSwipeCountUsed = 0
     @State private var showingDeleteReview = false
     @State private var showingDuplicateReview = false
     @State private var showingDateJump = false
     @State private var showingSettings = false
     @State private var tiltFeedback: TiltDirection?
     @State private var isPresentingSwipePaywall = false
+    @State private var tutorialStep: MainTutorialStep?
 
     private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
     private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
-    private let inkColor = Color.white
+    private var appBackground: Color {
+        colorScheme == .dark ? .black : Color(uiColor: .systemGroupedBackground)
+    }
+
+    private var cardBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.075) : Color.white
+    }
+
+    private var controlFill: Color {
+        colorScheme == .dark ? Color(red: 0.09, green: 0.10, blue: 0.12) : Color.white
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white : Color(red: 0.07, green: 0.08, blue: 0.10)
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? Color.white.opacity(0.68) : Color(red: 0.34, green: 0.36, blue: 0.42)
+    }
+
+    private var controlIconColor: Color {
+        colorScheme == .dark ? .white : Color(red: 0.08, green: 0.09, blue: 0.11)
+    }
 
     var body: some View {
         NavigationStack {
@@ -39,7 +221,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .navigationTitle("PhotoSweep")
+            .navigationTitle("CleanRoll")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if library.accessState.canReadAndWrite {
@@ -73,14 +255,17 @@ struct ContentView: View {
             .sheet(isPresented: $showingDateJump) {
                 DateJumpView()
                     .environmentObject(library)
-                    .preferredColorScheme(.dark)
             }
             .sheet(isPresented: $showingSettings) {
                 SettingsView(
                     tiltToSwipeEnabled: $tiltToSwipeEnabled,
-                    hasCompletedOnboarding: $hasCompletedOnboarding
+                    hasCompletedOnboarding: $hasCompletedOnboarding,
+                    onShowPro: {
+                        AnalyticsService.track("settings_pro_tapped")
+                        SuperwallBootstrap.presentPaywall(placement: "photo_sweep", source: "settings")
+                    }
                 )
-                    .preferredColorScheme(.dark)
+                .environmentObject(library)
             }
             .task {
                 guard hasCompletedOnboarding else { return }
@@ -98,7 +283,7 @@ struct ContentView: View {
                     }
                 }
             }
-            .alert("PhotoSweep", isPresented: Binding(
+            .alert("CleanRoll", isPresented: Binding(
                 get: { library.message != nil },
                 set: { if !$0 { library.message = nil } }
             )) {
@@ -108,62 +293,85 @@ struct ContentView: View {
             }
             .toolbar(.hidden, for: .navigationBar)
         }
-        .preferredColorScheme(.dark)
     }
 
     private var permissionView: some View {
-        VStack(spacing: 26) {
-            Image(systemName: "photo.stack.fill")
-                .font(.system(size: 56, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 104, height: 104)
-                .background(
-                    LinearGradient(
-                        colors: [keepColor, Color(red: 0.13, green: 0.38, blue: 0.78)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ),
-                    in: RoundedRectangle(cornerRadius: 28, style: .continuous)
-                )
-                .shadow(color: keepColor.opacity(0.20), radius: 20, x: 0, y: 12)
+        VStack(spacing: 20) {
+            Spacer(minLength: 16)
 
-            VStack(spacing: 12) {
-                Text("Allow Photo Access")
-                    .font(.system(size: 34, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
+            VStack(spacing: 18) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 36, weight: .semibold))
+                    .foregroundStyle(keepColor)
+                    .frame(width: 76, height: 76)
+                    .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 22, style: .continuous)
+                            .stroke(keepColor.opacity(0.28), lineWidth: 1)
+                    }
 
-                Text("PhotoSweep needs your library to find clutter and show photos for review.")
-                    .font(.headline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.86)
+                VStack(spacing: 10) {
+                    Text("Private Photo Access")
+                        .font(.system(size: 30, weight: .black, design: .rounded))
+                        .foregroundStyle(primaryText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.76)
+
+                    Text("CleanRoll needs access so you can swipe through your photos. Everything stays on this iPhone.")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(secondaryText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(4)
+                        .minimumScaleFactor(0.82)
+                }
+
+                VStack(spacing: 10) {
+                    permissionTrustRow("On-device review", "iphone")
+                    permissionTrustRow("No uploads", "icloud.slash")
+                    permissionTrustRow("You confirm deletes", "checkmark.shield")
+                }
             }
-
-            Label("Photos stay on your iPhone", systemImage: "lock.shield.fill")
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(keepColor)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(keepColor.opacity(0.13), in: Capsule())
+            .padding(20)
+            .background(cardBackground, in: RoundedRectangle(cornerRadius: 26, style: .continuous))
+            .overlay {
+                RoundedRectangle(cornerRadius: 26, style: .continuous)
+                    .stroke(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06), lineWidth: 1)
+            }
 
             Button {
                 AnalyticsService.track("photos_permission_requested")
                 library.requestAccess()
             } label: {
-                Text("Allow Photos")
+                Text("Continue")
                     .font(.headline.weight(.black))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 56)
+                    .frame(height: 52)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
             .foregroundStyle(.black)
-            .background(keepColor, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .buttonStyle(.plain)
+            .background(keepColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+
+            Spacer(minLength: 16)
         }
-        .padding(24)
+        .padding(.horizontal, 22)
+        .padding(.vertical, 18)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.black)
+        .background(
+            LinearGradient(
+                colors: colorScheme == .dark ? [
+                    Color(red: 0.055, green: 0.09, blue: 0.10),
+                    Color(red: 0.05, green: 0.07, blue: 0.13)
+                ] : [
+                    Color(red: 0.94, green: 0.99, blue: 0.97),
+                    Color(red: 0.97, green: 0.98, blue: 1.0)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+            .ignoresSafeArea()
+        )
     }
 
     private var blockedView: some View {
@@ -178,6 +386,25 @@ struct ContentView: View {
             }
             .buttonStyle(.borderedProminent)
         }
+    }
+
+    private func permissionTrustRow(_ title: String, _ systemImage: String) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.subheadline.weight(.black))
+                .foregroundStyle(keepColor)
+                .frame(width: 28, height: 28)
+                .background(keepColor.opacity(0.13), in: Circle())
+
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(primaryText.opacity(0.86))
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .background(colorScheme == .dark ? Color.black.opacity(0.18) : Color.black.opacity(0.04), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var reviewView: some View {
@@ -229,10 +456,12 @@ struct ContentView: View {
                 completionView
             }
         }
-        .background(Color.black)
+        .background(appBackground)
+        .blur(radius: tutorialStep == nil ? 0 : 2.5)
         .onAppear {
             updateTiltMonitoring()
             preheatUpcomingImages()
+            startMainTutorialIfNeeded()
         }
         .onDisappear {
             tiltController.stop()
@@ -243,6 +472,7 @@ struct ContentView: View {
         .onChange(of: library.currentAsset?.localIdentifier) {
             updateTiltMonitoring()
             preheatUpcomingImages()
+            startMainTutorialIfNeeded()
         }
         .onChange(of: library.assets.count) {
             preheatUpcomingImages()
@@ -256,6 +486,13 @@ struct ContentView: View {
         .onChange(of: showingDateJump) {
             updateTiltMonitoring()
         }
+        .overlay {
+            if let tutorialStep, !showingDeleteReview, !showingDuplicateReview, !showingDateJump, !showingSettings {
+                tutorialOverlay(for: tutorialStep)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.snappy(duration: 0.24), value: tutorialStep)
     }
 
     private var topControls: some View {
@@ -267,7 +504,7 @@ struct ContentView: View {
             Text(positionText)
                 .font(.system(.subheadline, design: .rounded).weight(.bold))
                 .monospacedDigit()
-                .foregroundStyle(Color.white.opacity(0.72))
+                .foregroundStyle(secondaryText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .accessibilityLabel("Review progress \(positionText)")
@@ -276,7 +513,7 @@ struct ContentView: View {
 
             topIconButton(
                 systemImage: "calendar",
-                tint: .white,
+                tint: controlIconColor,
                 accessibilityLabel: "Jump to date"
             ) {
                 AnalyticsService.track("date_jump_opened")
@@ -285,7 +522,7 @@ struct ContentView: View {
 
             topIconButton(
                 systemImage: "rectangle.on.rectangle.angled",
-                tint: .white,
+                tint: controlIconColor,
                 badge: duplicateBadge,
                 progress: library.isScanningDuplicates ? library.duplicateScanProgress : nil,
                 accessibilityLabel: "Duplicates"
@@ -299,7 +536,7 @@ struct ContentView: View {
 
             topIconButton(
                 systemImage: "gearshape.fill",
-                tint: .white,
+                tint: controlIconColor,
                 accessibilityLabel: "Settings"
             ) {
                 AnalyticsService.track("settings_opened")
@@ -342,11 +579,11 @@ struct ContentView: View {
                 Image(systemName: "line.3.horizontal.decrease")
                     .font(.system(size: 17, weight: .bold))
                     .frame(width: 48, height: 48)
-                    .foregroundStyle(.white)
+                    .foregroundStyle(controlIconColor)
                     .background(controlFill, in: Circle())
                     .overlay {
                         Circle()
-                            .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                            .stroke(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.08), lineWidth: 1)
                     }
 
                 if library.filter != .photos {
@@ -367,7 +604,7 @@ struct ContentView: View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.white.opacity(0.10))
+                    .fill(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.10))
 
                 Capsule()
                     .fill(keepColor)
@@ -417,13 +654,13 @@ struct ContentView: View {
         if !upcoming.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
-                    Label("Keep ahead", systemImage: "forward.fill")
+                    Label("Skip ahead", systemImage: "forward.fill")
                         .font(.caption.weight(.black))
-                        .foregroundStyle(.white)
+                    .foregroundStyle(primaryText)
 
                     Text("tap a preview")
                         .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white.opacity(0.48))
+                        .foregroundStyle(secondaryText.opacity(0.82))
 
                     Spacer(minLength: 0)
                 }
@@ -451,7 +688,7 @@ struct ContentView: View {
             }
             .padding(.top, 8)
             .padding(.bottom, 10)
-            .background(Color.black)
+            .background(appBackground)
         }
     }
 
@@ -491,10 +728,6 @@ struct ContentView: View {
 
     private var deleteBadge: String? {
         library.deleteCount == 0 ? nil : compactNumber(library.deleteCount)
-    }
-
-    private var controlFill: Color {
-        Color(red: 0.09, green: 0.10, blue: 0.12)
     }
 
     private var tiltMonitoringAllowed: Bool {
@@ -549,45 +782,69 @@ struct ContentView: View {
     ) {
         let decision = {
             guard count > 0 else { return }
-
-            resetDailySwipeCountIfNeeded()
-
-            if SuperwallBootstrap.hasActiveSubscription {
+            let runSwipeAction = {
                 action()
-                trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, subscriber: true)
+                advanceTutorialAfterSwipeIfNeeded(reviewDecision)
+            }
+
+            #if DEBUG
+            debugPaywallLog("DEBUG build: bypassing paywall and free swipe limit")
+            runSwipeAction()
+            trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, proUser: false)
+            return
+            #endif
+
+            let hasProAccess = SuperwallBootstrap.hasProAccess
+            debugPaywallLog(
+                "swipe decision source=\(source) decision=\(reviewDecision.rawValue) requestedCount=\(count) freeSwipeCountUsed=\(freeSwipeCountUsed) hasProAccess=\(hasProAccess)"
+            )
+
+            if hasProAccess {
+                debugPaywallLog("allowing swipe because Pro access is active")
+                runSwipeAction()
+                trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, proUser: true)
                 return
             }
 
-            if DailySwipeGate.canUseFreeSwipes(currentCount: dailySwipeCount, requestedCount: count) {
-                dailySwipeCount += count
-                action()
-                trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, subscriber: false)
+            if LifetimeSwipeGate.canUseFreeSwipes(usedCount: freeSwipeCountUsed, requestedCount: count) {
+                debugPaywallLog("allowing lifetime free swipe; count \(freeSwipeCountUsed) -> \(freeSwipeCountUsed + count)")
+                freeSwipeCountUsed += count
+                runSwipeAction()
+                trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, proUser: false)
                 return
             }
 
-            guard !isPresentingSwipePaywall else { return }
+            guard !isPresentingSwipePaywall else {
+                debugPaywallLog("blocked paywall request because a paywall is already being presented")
+                return
+            }
             isPresentingSwipePaywall = true
+            debugPaywallLog("free limit reached; requesting Superwall placement=photo_sweep")
             AnalyticsService.track("free_swipe_limit_reached", properties: [
-                "daily_swipe_count": dailySwipeCount,
+                "free_swipes_used": freeSwipeCountUsed,
                 "requested_swipe_count": count,
-                "free_swipe_limit": DailySwipeGate.freeSwipeLimit,
+                "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+                "free_limit_type": "lifetime",
                 "source": source,
                 "decision": reviewDecision.rawValue
             ])
 
-            SuperwallBootstrap.requireActiveSubscription(
+            SuperwallBootstrap.requireProAccess(
                 placement: "photo_sweep",
                 params: [
-                    "daily_swipe_count": dailySwipeCount,
+                    "free_swipes_used": freeSwipeCountUsed,
                     "requested_swipe_count": count,
-                    "free_swipe_limit": DailySwipeGate.freeSwipeLimit
+                    "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+                    "free_limit_type": "lifetime"
                 ],
                 onComplete: {
+                    debugPaywallLog("Superwall paywall flow completed; clearing isPresentingSwipePaywall")
                     isPresentingSwipePaywall = false
                 }
             ) {
-                action()
-                trackSwipeDecision(reviewDecision, source: source, count: count, gated: true, subscriber: true)
+                debugPaywallLog("Superwall unlocked swipe action after purchase/restore")
+                runSwipeAction()
+                trackSwipeDecision(reviewDecision, source: source, count: count, gated: true, proUser: true)
             }
         }
 
@@ -605,27 +862,172 @@ struct ContentView: View {
         source: String,
         count: Int,
         gated: Bool,
-        subscriber: Bool
+        proUser: Bool
     ) {
         AnalyticsService.track("photo_swiped_\(decision.rawValue)", properties: [
             "decision": decision.rawValue,
             "source": source,
             "swipe_count": count,
             "filter": library.filter.rawValue,
-            "daily_swipe_count": dailySwipeCount,
-            "free_swipe_limit": DailySwipeGate.freeSwipeLimit,
+            "free_swipes_used": freeSwipeCountUsed,
+            "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+            "free_limit_type": "lifetime",
             "was_paywall_gated": gated,
-            "subscriber": subscriber
+            "pro_user": proUser
         ])
     }
 
-    private func resetDailySwipeCountIfNeeded() {
-        let normalized = DailySwipeGate.normalizedCount(
-            storedCount: dailySwipeCount,
-            storedDay: dailySwipeDate
-        )
-        dailySwipeDate = normalized.day
-        dailySwipeCount = normalized.count
+    private func startMainTutorialIfNeeded() {
+        guard !hasSeenMainTutorial,
+              tutorialStep == nil,
+              library.accessState.canReadAndWrite,
+              !library.isLoading,
+              library.currentAsset != nil else {
+            return
+        }
+
+        tutorialStep = .swipe
+        AnalyticsService.track("main_tutorial_started")
+    }
+
+    private func advanceTutorialAfterSwipeIfNeeded(_ decision: ReviewDecision) {
+        guard tutorialStep == .swipe, decision == .delete else { return }
+        tutorialStep = .deleteReview
+        AnalyticsService.track("main_tutorial_delete_marked")
+    }
+
+    private func advanceTutorial() {
+        switch tutorialStep {
+        case .swipe:
+            break
+        case .deleteReview:
+            tutorialStep = .filter
+        case .filter:
+            tutorialStep = .calendar
+        case .calendar:
+            tutorialStep = .duplicates
+        case .duplicates:
+            completeTutorial()
+        case nil:
+            break
+        }
+    }
+
+    private func completeTutorial() {
+        hasSeenMainTutorial = true
+        tutorialStep = nil
+        AnalyticsService.track("main_tutorial_completed")
+    }
+
+    private func tutorialOverlay(for step: MainTutorialStep) -> some View {
+        GeometryReader { proxy in
+            ZStack {
+                Color.black.opacity(0.56)
+                    .ignoresSafeArea()
+
+                if step != .swipe {
+                    tutorialSpotlight(for: step, in: proxy.size)
+
+                    tutorialArrow(for: step, in: proxy.size)
+                }
+
+                tutorialCard(for: step)
+                    .frame(maxWidth: min(proxy.size.width - 32, 380))
+                    .position(step.cardPosition(in: proxy.size))
+            }
+            .allowsHitTesting(step != .swipe)
+        }
+    }
+
+    private func tutorialSpotlight(for step: MainTutorialStep, in size: CGSize) -> some View {
+        let frame = step.spotlightFrame(in: size)
+
+        return RoundedRectangle(cornerRadius: step.spotlightCornerRadius, style: .continuous)
+            .stroke(step.tint, lineWidth: 4)
+            .background(
+                RoundedRectangle(cornerRadius: step.spotlightCornerRadius, style: .continuous)
+                    .fill(Color.white.opacity(0.08))
+            )
+            .shadow(color: step.tint.opacity(0.55), radius: 18, x: 0, y: 0)
+            .frame(width: frame.width, height: frame.height)
+            .position(x: frame.midX, y: frame.midY)
+            .accessibilityHidden(true)
+    }
+
+    private func tutorialArrow(for step: MainTutorialStep, in size: CGSize) -> some View {
+        Image(systemName: step.arrowImageName)
+            .font(.system(size: 34, weight: .black))
+            .foregroundStyle(step.tint)
+            .shadow(color: .black.opacity(0.55), radius: 8, x: 0, y: 4)
+            .position(step.arrowPosition(in: size))
+            .accessibilityHidden(true)
+    }
+
+    private func tutorialCard(for step: MainTutorialStep) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 12) {
+                Image(systemName: step.systemImage)
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(step.tint)
+                    .frame(width: 38, height: 38)
+                    .background(step.tint.opacity(0.14), in: Circle())
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(step.title)
+                        .font(.headline.weight(.black))
+                        .foregroundStyle(.white)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.78)
+
+                    Text(step.subtitle)
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(.white.opacity(0.68))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            if step == .swipe {
+                Text("Swipe left to continue")
+                    .font(.subheadline.weight(.black))
+                    .foregroundStyle(step.tint)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
+            } else {
+                HStack(spacing: 10) {
+                    Button("Skip") {
+                        completeTutorial()
+                    }
+                    .font(.subheadline.weight(.bold))
+                    .foregroundStyle(.white.opacity(0.54))
+
+                    Spacer(minLength: 0)
+
+                    Button {
+                        advanceTutorial()
+                    } label: {
+                        Text(step.buttonTitle)
+                            .font(.subheadline.weight(.black))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 18)
+                            .frame(height: 40)
+                            .background(step.tint, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .padding(16)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(Color.white.opacity(0.16), lineWidth: 1)
+        }
+        .shadow(color: .black.opacity(0.38), radius: 22, x: 0, y: 12)
+    }
+
+    private func debugPaywallLog(_ message: String) {
+        #if DEBUG
+        print("PhotoSweepPaywall \(message)")
+        #endif
     }
 
     private func preheatUpcomingImages() {
@@ -675,11 +1077,11 @@ struct ContentView: View {
                 Image(systemName: systemImage)
                     .font(.system(size: 17, weight: .bold))
                     .frame(width: 48, height: 48)
-                    .foregroundStyle(isEnabled ? tint : Color.white.opacity(0.22))
+                    .foregroundStyle(isEnabled ? tint : secondaryText.opacity(0.45))
                     .background(controlFill.opacity(isEnabled ? 1 : 0.56), in: Circle())
                     .overlay {
                         Circle()
-                            .stroke(Color.white.opacity(isEnabled ? 0.10 : 0.04), lineWidth: 1)
+                            .stroke(colorScheme == .dark ? Color.white.opacity(isEnabled ? 0.10 : 0.04) : Color.black.opacity(isEnabled ? 0.08 : 0.03), lineWidth: 1)
                     }
 
                 if let progress {
@@ -721,7 +1123,7 @@ struct ContentView: View {
             .foregroundStyle(isActive ? .black : color)
             .padding(.horizontal, 10)
             .padding(.vertical, 6)
-            .background(isActive ? color : Color.white.opacity(0.07), in: Capsule())
+            .background(isActive ? color : (colorScheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.045)), in: Capsule())
             .overlay {
                 Capsule()
                     .stroke(color.opacity(isActive ? 0 : 0.22), lineWidth: 1)
@@ -742,7 +1144,7 @@ struct ContentView: View {
                 .font(.system(.headline, design: .rounded).weight(.black))
                 .lineLimit(1)
                 .minimumScaleFactor(0.84)
-                .foregroundStyle(.white)
+                .foregroundStyle(primaryText)
                 .frame(maxWidth: .infinity)
                 .frame(height: 54)
                 .background(color.opacity(0.72), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
@@ -769,7 +1171,7 @@ struct ContentView: View {
 
             Text("\(library.deleteCount) item\(library.deleteCount == 1 ? "" : "s") marked for deletion. Review them before iOS asks for final confirmation.")
                 .font(.body)
-                .foregroundStyle(.white.opacity(0.64))
+                .foregroundStyle(secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 28)
 
@@ -829,12 +1231,49 @@ private struct QuickSkipThumbnail: View {
 
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
+    @EnvironmentObject private var library: PhotoLibraryStore
     @Binding var tiltToSwipeEnabled: Bool
     @Binding var hasCompletedOnboarding: Bool
+    let onShowPro: () -> Void
+    @State private var isRestoringPurchases = false
+    @State private var isResettingPhotos = false
+    @State private var restoreAlert: RestoreAlert?
 
     var body: some View {
         NavigationStack {
             Form {
+                #if !DEBUG
+                Section {
+                    Button {
+                        onShowPro()
+                    } label: {
+                        Label("CleanRoll Pro", systemImage: "crown.fill")
+                    }
+
+                    Text("Unlock unlimited swipes and duplicate cleanup with a one-time Pro upgrade.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+
+                    Button {
+                        restorePurchases()
+                    } label: {
+                        HStack {
+                            Label("Restore Purchases", systemImage: "arrow.clockwise")
+
+                            if isRestoringPurchases {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isRestoringPurchases)
+                } header: {
+                    Text("Pro")
+                } footer: {
+                    Text("Tap CleanRoll Pro to view upgrade options or Restore Purchases if you already bought Lifetime Pro.")
+                }
+                #endif
+
                 Section {
                     Toggle(isOn: $tiltToSwipeEnabled) {
                         Label("Tilt to Swipe", systemImage: "iphone.radiowaves.left.and.right")
@@ -846,16 +1285,34 @@ private struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                #if DEBUG
                 Section {
+                    Button(role: .destructive) {
+                        resetPhotosForDebug()
+                    } label: {
+                        HStack {
+                            Label("Bring Back All Photos", systemImage: "arrow.counterclockwise.circle.fill")
+
+                            if isResettingPhotos {
+                                Spacer()
+                                ProgressView()
+                            }
+                        }
+                    }
+                    .disabled(isResettingPhotos)
+
                     Button {
                         hasCompletedOnboarding = false
                         dismiss()
                     } label: {
                         Label("Restart Onboarding", systemImage: "arrow.counterclockwise")
                     }
+                } header: {
+                    Text("Debug")
                 } footer: {
-                    Text("Use this while testing the onboarding flow.")
+                    Text("Bring Back All Photos clears local swipe history and reloads the library. It does not restore photos already deleted from iOS Photos.")
                 }
+                #endif
 
                 Section {
                     Link(destination: LegalLinks.privacyPolicy) {
@@ -868,13 +1325,20 @@ private struct SettingsView: View {
                 } header: {
                     Text("Legal")
                 } footer: {
-                    Text("Subscriptions use Apple's Standard End User License Agreement.")
+                    Text("Purchases use Apple's Standard End User License Agreement.")
                 }
             }
             .scrollContentBackground(.hidden)
-            .background(Color.black)
+            .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .alert(item: $restoreAlert) { alert in
+                Alert(
+                    title: Text(alert.title),
+                    message: Text(alert.message),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
@@ -883,5 +1347,56 @@ private struct SettingsView: View {
                 }
             }
         }
+    }
+
+    private func restorePurchases() {
+        guard !isRestoringPurchases else { return }
+
+        isRestoringPurchases = true
+        Task {
+            let outcome = await SuperwallBootstrap.restorePurchases()
+            await MainActor.run {
+                isRestoringPurchases = false
+
+                switch outcome {
+                case .restoredProAccess:
+                    restoreAlert = RestoreAlert(
+                        title: "Purchases Restored",
+                        message: "Your Lifetime Pro access has been restored."
+                    )
+                case .noPurchaseFound:
+                    restoreAlert = RestoreAlert(
+                        title: "No Purchase Found",
+                        message: "We could not find a previous Lifetime Pro purchase for this Apple ID."
+                    )
+                case .failed(let message):
+                    restoreAlert = RestoreAlert(
+                        title: "Restore Failed",
+                        message: message
+                    )
+                }
+            }
+        }
+    }
+
+    #if DEBUG
+    private func resetPhotosForDebug() {
+        guard !isResettingPhotos else { return }
+
+        isResettingPhotos = true
+        Task {
+            await library.resetAllReviewStateForDebug()
+            await MainActor.run {
+                isResettingPhotos = false
+                dismiss()
+            }
+        }
+    }
+    #endif
+
+    private struct RestoreAlert: Identifiable {
+        let id = UUID()
+        let title: String
+        let message: String
     }
 }

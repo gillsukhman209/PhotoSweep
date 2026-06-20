@@ -1,13 +1,29 @@
 import Photos
-import SuperwallKit
 import SwiftUI
 
 struct DuplicateReviewView: View {
     @EnvironmentObject private var library: PhotoLibraryStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var colorScheme
 
     private let keepColor = Color(red: 0.18, green: 0.78, blue: 0.49)
     private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
+
+    private var backgroundColor: Color {
+        colorScheme == .dark ? .black : Color(uiColor: .systemGroupedBackground)
+    }
+
+    private var cardColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.08) : Color.white
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white : Color(red: 0.07, green: 0.08, blue: 0.10)
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? Color.white.opacity(0.62) : Color(red: 0.36, green: 0.38, blue: 0.44)
+    }
 
     var body: some View {
         NavigationStack {
@@ -20,7 +36,7 @@ struct DuplicateReviewView: View {
                     groupsView
                 }
             }
-            .background(Color.black)
+            .background(backgroundColor)
             .navigationTitle("Duplicates")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -31,7 +47,6 @@ struct DuplicateReviewView: View {
                 }
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private var scanningView: some View {
@@ -44,11 +59,11 @@ struct DuplicateReviewView: View {
 
             Text("Finding duplicates")
                 .font(.title3.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(primaryText)
 
-            Text("Results will appear as soon as PhotoSweep finds each matching set.")
+            Text("Results will appear as soon as CleanRoll finds each matching set.")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(secondaryText)
                 .multilineTextAlignment(.center)
 
             Button {
@@ -77,11 +92,11 @@ struct DuplicateReviewView: View {
 
             Text("Find duplicate photos")
                 .font(.title2.weight(.bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(primaryText)
 
             Text("For every duplicate set, you keep one photo and send the extra copies to Review Deletes.")
                 .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.62))
+                .foregroundStyle(secondaryText)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 18)
 
@@ -97,9 +112,9 @@ struct DuplicateReviewView: View {
             .tint(keepColor)
             .padding(.top, 8)
 
-            Text("You can keep swiping while PhotoSweep scans.")
+            Text("You can keep swiping while CleanRoll scans.")
                 .font(.footnote.weight(.semibold))
-                .foregroundStyle(.white.opacity(0.56))
+                .foregroundStyle(secondaryText.opacity(0.9))
 
             Spacer()
         }
@@ -112,11 +127,11 @@ struct DuplicateReviewView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("\(library.duplicateGroups.count) duplicate set\(library.duplicateGroups.count == 1 ? "" : "s")")
                         .font(.title2.weight(.bold))
-                        .foregroundStyle(.white)
+                        .foregroundStyle(primaryText)
 
                     Text("Keeps one photo in each set. Duplicates are sent to Review Deletes first.")
                         .font(.subheadline)
-                        .foregroundStyle(.white.opacity(0.62))
+                        .foregroundStyle(secondaryText)
                 }
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
@@ -148,7 +163,7 @@ struct DuplicateReviewView: View {
             .controlSize(.large)
             .tint(deleteColor)
             .padding(16)
-            .background(.black.opacity(0.86))
+            .background(.regularMaterial)
         }
     }
 
@@ -157,20 +172,20 @@ struct DuplicateReviewView: View {
             HStack {
                 Text("Still scanning")
                     .font(.subheadline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(primaryText)
 
                 Spacer()
 
                 Text("\(Int(library.duplicateScanProgress * 100))%")
                     .font(.caption.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.68))
+                    .foregroundStyle(secondaryText)
             }
 
             ProgressView(value: library.duplicateScanProgress)
                 .tint(keepColor)
         }
         .padding(14)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(cardColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .padding(.horizontal, 16)
     }
 
@@ -183,7 +198,7 @@ struct DuplicateReviewView: View {
             HStack(spacing: 10) {
                 Text("\(group.assets.count) copies")
                     .font(.headline.weight(.bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(primaryText)
 
                 Spacer()
 
@@ -228,14 +243,14 @@ struct DuplicateReviewView: View {
             if group.duplicates.count > 2 {
                 Text("+\(group.duplicates.count - 2) more duplicate \(group.duplicates.count - 2 == 1 ? "copy" : "copies") in this set")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.58))
+                    .foregroundStyle(secondaryText)
             }
         }
         .padding(14)
-        .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .background(cardColor, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .stroke(Color.white.opacity(0.10), lineWidth: 1)
+                .stroke(colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.06), lineWidth: 1)
         }
         .padding(.horizontal, 16)
     }
@@ -248,7 +263,7 @@ struct DuplicateReviewView: View {
 
             Text(label)
                 .font(.caption.weight(.black))
-                .foregroundStyle(label == "Keep" ? .black : .white)
+                .foregroundStyle(label == "Keep" ? .black : primaryText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 5)
                 .background(color, in: Capsule())

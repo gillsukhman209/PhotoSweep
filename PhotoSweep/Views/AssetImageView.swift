@@ -24,7 +24,7 @@ enum PhotoImagePipeline {
         let options = PHImageRequestOptions()
         options.deliveryMode = quality == .thumbnail ? .fastFormat : .opportunistic
         options.resizeMode = .fast
-        options.isNetworkAccessAllowed = quality == .full
+        options.isNetworkAccessAllowed = true
         return options
     }
 
@@ -51,6 +51,8 @@ enum PhotoImagePipeline {
 @MainActor
 final class AssetImageLoader: ObservableObject {
     @Published var image: UIImage?
+    @Published var isLoading = false
+    @Published var failed = false
     private var requestID: PHImageRequestID?
     private var requestedAssetID: String?
 
@@ -58,6 +60,8 @@ final class AssetImageLoader: ObservableObject {
         if requestedAssetID != asset.localIdentifier {
             image = nil
         }
+        isLoading = true
+        failed = false
         requestedAssetID = asset.localIdentifier
         if let requestID {
             PHImageManager.default().cancelImageRequest(requestID)
@@ -68,11 +72,26 @@ final class AssetImageLoader: ObservableObject {
             targetSize: PhotoImagePipeline.targetSize(for: targetSize, quality: quality),
             contentMode: PhotoImagePipeline.contentMode(for: contentMode),
             options: PhotoImagePipeline.options(for: quality)
-        ) { [weak self] image, _ in
+        ) { [weak self] image, info in
             let assetID = asset.localIdentifier
+            let isCancelled = (info?[PHImageCancelledKey] as? Bool) == true
+            let hasError = info?[PHImageErrorKey] != nil
+            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) == true
             Task { @MainActor in
                 guard self?.requestedAssetID == assetID else { return }
-                self?.image = image
+                if let image {
+                    self?.image = image
+                    self?.failed = false
+                    if !isDegraded {
+                        self?.isLoading = false
+                    }
+                    return
+                }
+
+                if isCancelled || hasError || !isDegraded {
+                    self?.isLoading = false
+                    self?.failed = true
+                }
             }
         }
     }
@@ -109,10 +128,14 @@ struct AssetImageView: View {
                         .aspectRatio(contentMode: contentMode)
                         .frame(width: proxy.size.width, height: proxy.size.height)
                         .clipped()
-                } else {
+                } else if loader.isLoading {
                     ProgressView()
                         .controlSize(.large)
                         .tint(.white)
+                } else {
+                    Image(systemName: loader.failed ? "photo.badge.exclamationmark" : "photo")
+                        .font(.system(size: 24, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.46))
                 }
             }
             .task(id: "\(asset.localIdentifier)-\(quality.rawValue)") {

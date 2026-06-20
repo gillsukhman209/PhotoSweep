@@ -542,9 +542,29 @@ final class PhotoLibraryStore: ObservableObject {
         message = nil
     }
 
-    func deleteQueuedAssets() async {
+    #if DEBUG
+    func resetAllReviewStateForDebug() async {
+        duplicateScanTask?.cancel()
+        duplicateScanTask = nil
+        isScanningDuplicates = false
+        duplicateScanProgress = 0
+        duplicateGroups = []
+        keptAssetIDs.removeAll()
+        queuedDeleteAssetIDs.removeAll()
+        UserDefaults.standard.removeObject(forKey: keptAssetIDsKey)
+        UserDefaults.standard.removeObject(forKey: queuedDeleteAssetIDsKey)
+        decisions = [:]
+        history = []
+        currentIndex = 0
+        message = "Debug reset complete. All swiped photos are back in the review queue."
+        await loadAssets(resetSession: true)
+    }
+    #endif
+
+    @discardableResult
+    func deleteQueuedAssets() async -> Bool {
         let targets = queuedDeleteAssets
-        guard !targets.isEmpty else { return }
+        guard !targets.isEmpty else { return false }
         let requestedDeleteCount = targets.count
 
         isDeleting = true
@@ -573,12 +593,14 @@ final class PhotoLibraryStore: ObservableObject {
             targets.forEach { forgetQueuedDeleteAssetID($0.localIdentifier) }
             decisions = decisions.filter { _, decision in decision != .delete }
             await loadAssets(resetSession: false)
+            return true
         } catch {
             AnalyticsService.track("queued_delete_failed", properties: [
                 "item_count": requestedDeleteCount,
                 "error": String(describing: error)
             ])
             message = error.localizedDescription
+            return false
         }
     }
 

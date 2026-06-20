@@ -1,4 +1,12 @@
 import Foundation
+
+#if DEBUG
+enum AnalyticsService {
+    static func configure() {}
+
+    static func track(_ event: String, properties: [String: Any] = [:]) {}
+}
+#else
 import PostHog
 
 enum AnalyticsService {
@@ -21,10 +29,6 @@ enum AnalyticsService {
         config.captureScreenViews = false
         config.sessionReplay = false
         config.flushAt = 10
-
-        #if DEBUG
-        config.debug = true
-        #endif
 
         PostHogSDK.shared.setup(config)
         isConfigured = true
@@ -64,3 +68,4 @@ enum AnalyticsService {
         }
     }
 }
+#endif

@@ -1,5 +1,4 @@
 import SwiftUI
-import SuperwallKit
 
 @main
 struct PhotoSweepApp: App {

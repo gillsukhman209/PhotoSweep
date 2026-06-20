@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct OnboardingView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let onComplete: () -> Void
 
     @State private var selectedPage = 0
@@ -9,7 +10,9 @@ struct OnboardingView: View {
     private let pages = OnboardingPage.allPages
     private let accent = Color(red: 0.30, green: 0.36, blue: 1.0)
     private let accentEnd = Color(red: 0.38, green: 0.20, blue: 1.0)
-    private let background = Color(red: 0.06, green: 0.07, blue: 0.13)
+    private var background: Color {
+        colorScheme == .dark ? Color(red: 0.06, green: 0.07, blue: 0.13) : Color(red: 0.94, green: 0.97, blue: 1.0)
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,7 +45,7 @@ struct OnboardingView: View {
             ForEach(pages.indices, id: \.self) { index in
                 GeometryReader { proxy in
                     Capsule()
-                        .fill(Color.white.opacity(0.18))
+                        .fill(colorScheme == .dark ? Color.white.opacity(0.18) : Color.black.opacity(0.12))
                         .overlay(alignment: .leading) {
                             Capsule()
                                 .fill(accent)
@@ -57,15 +60,15 @@ struct OnboardingView: View {
     }
 
     private var bottomControls: some View {
-        VStack(spacing: 15) {
+        VStack(spacing: 0) {
             Button {
                 advance()
             } label: {
                 Text(selectedPage == pages.count - 1 ? "Start Cleaning" : "Continue")
-                    .font(.system(size: 22, weight: .black, design: .rounded))
+                    .font(.system(size: 21, weight: .black, design: .rounded))
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 58)
+                    .frame(height: 56)
                     .background(
                         LinearGradient(
                             colors: [Color(red: 0.26, green: 0.48, blue: 1.0), accentEnd],
@@ -76,31 +79,6 @@ struct OnboardingView: View {
                     )
             }
             .buttonStyle(.plain)
-
-            Button {
-                AnalyticsService.track("onboarding_skipped", properties: [
-                    "page_index": selectedPage,
-                    "page_count": pages.count
-                ])
-                onComplete()
-            } label: {
-                Text("Skip")
-                    .font(.footnote.weight(.bold))
-                    .foregroundStyle(.white.opacity(0.42))
-                    .frame(height: 28)
-            }
-            .buttonStyle(.plain)
-
-            HStack(spacing: 8) {
-                Link("Privacy Policy", destination: LegalLinks.privacyPolicy)
-
-                Text("•")
-                    .foregroundStyle(.white.opacity(0.28))
-
-                Link("Terms of Use", destination: LegalLinks.termsOfUse)
-            }
-            .font(.caption.weight(.semibold))
-            .foregroundStyle(.white.opacity(0.48))
         }
     }
 
@@ -129,39 +107,59 @@ struct OnboardingView: View {
 }
 
 private struct OnboardingPageView: View {
+    @Environment(\.colorScheme) private var colorScheme
     let page: OnboardingPage
 
+    private var primaryText: Color {
+        colorScheme == .dark ? .white : Color(red: 0.07, green: 0.08, blue: 0.10)
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? Color.white.opacity(0.66) : Color(red: 0.36, green: 0.38, blue: 0.44)
+    }
+
     var body: some View {
-        VStack(spacing: 18) {
-            Spacer(minLength: 18)
+        GeometryReader { proxy in
+            let height = proxy.size.height
+            let compact = height < 620
+            let titleSize: CGFloat = compact ? 31 : 38
+            let subtitleSize: CGFloat = compact ? 17 : 20
+            let imageHeight = min(page.imageHeight, max(250, height * (compact ? 0.48 : 0.57)))
 
-            VStack(spacing: 14) {
-                Text(page.title)
-                    .font(.system(size: 38, weight: .black, design: .rounded))
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.72)
+            VStack(spacing: compact ? 12 : 18) {
+                Spacer(minLength: compact ? 8 : 18)
 
-                Text(page.subtitle)
-                    .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.66))
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(2)
-                    .lineLimit(3)
-                    .minimumScaleFactor(0.80)
+                VStack(spacing: compact ? 9 : 14) {
+                    Text(page.title)
+                        .font(.system(size: titleSize, weight: .black, design: .rounded))
+                        .foregroundStyle(primaryText)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(4)
+                        .minimumScaleFactor(0.56)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Text(page.subtitle)
+                        .font(.system(size: subtitleSize, weight: .bold, design: .rounded))
+                        .foregroundStyle(secondaryText)
+                        .multilineTextAlignment(.center)
+                        .lineSpacing(2)
+                        .lineLimit(4)
+                        .minimumScaleFactor(0.68)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(.horizontal, compact ? 16 : 22)
+
+                Image(page.imageName)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: .infinity)
+                    .frame(height: imageHeight)
+                    .padding(.horizontal, page.horizontalPadding)
+                    .accessibilityHidden(true)
+
+                Spacer(minLength: compact ? 4 : 10)
             }
-            .padding(.horizontal, 22)
-
-            Image(page.imageName)
-                .resizable()
-                .scaledToFit()
-                .frame(maxWidth: .infinity)
-                .frame(height: page.imageHeight)
-                .padding(.horizontal, page.horizontalPadding)
-                .accessibilityHidden(true)
-
-            Spacer(minLength: 10)
+            .frame(width: proxy.size.width, height: proxy.size.height)
         }
     }
 }
@@ -214,5 +212,4 @@ private struct OnboardingPage {
 
 #Preview {
     OnboardingView {}
-        .preferredColorScheme(.dark)
 }

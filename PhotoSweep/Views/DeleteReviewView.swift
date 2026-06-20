@@ -1,13 +1,28 @@
 import Photos
+import StoreKit
 import SwiftUI
 
 struct DeleteReviewView: View {
     @EnvironmentObject private var library: PhotoLibraryStore
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.requestReview) private var requestReview
+    @Environment(\.colorScheme) private var colorScheme
 
+    @AppStorage("PhotoSweep.hasRequestedReviewAfterFirstDelete") private var hasRequestedReviewAfterFirstDelete = false
     @State private var showDeleteConfirmation = false
     private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
-    private let inkColor = Color.white
+
+    private var backgroundColor: Color {
+        colorScheme == .dark ? .black : Color(uiColor: .systemGroupedBackground)
+    }
+
+    private var primaryText: Color {
+        colorScheme == .dark ? .white : Color(red: 0.07, green: 0.08, blue: 0.10)
+    }
+
+    private var secondaryText: Color {
+        colorScheme == .dark ? Color.white.opacity(0.62) : Color(red: 0.36, green: 0.38, blue: 0.44)
+    }
 
     private let columns = [
         GridItem(.adaptive(minimum: 104), spacing: 10)
@@ -27,11 +42,11 @@ struct DeleteReviewView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("\(library.deleteCount) marked photo\(library.deleteCount == 1 ? "" : "s")")
                                 .font(.title2.weight(.bold))
-                                .foregroundStyle(inkColor)
+                                .foregroundStyle(primaryText)
 
-                            Text("These are not deleted yet. Remove anything you want to keep, then ask iOS to delete the rest.")
+                            Text("These are not deleted yet. Remove anything you want to keep, then delete the rest.")
                                 .font(.subheadline)
-                                .foregroundStyle(.white.opacity(0.62))
+                                .foregroundStyle(secondaryText)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 16)
@@ -46,41 +61,23 @@ struct DeleteReviewView: View {
                     }
                 }
             }
-            .background(Color.black)
+            .background(backgroundColor)
             .navigationTitle("Review Deletes")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") {
                         dismiss()
                     }
-                }
-
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button(role: .destructive) {
-                        showDeleteConfirmation = true
-                    } label: {
-                        if library.isDeleting {
-                            ProgressView()
-                        } else {
-                            Text("Delete")
-                                .fontWeight(.semibold)
-                        }
-                    }
-                    .disabled(library.queuedDeleteAssets.isEmpty || library.isDeleting)
                 }
             }
             .safeAreaInset(edge: .bottom) {
                 if !library.queuedDeleteAssets.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("iOS will show one final confirmation. Deleted photos move to Recently Deleted first.")
-                            .font(.footnote)
-                            .foregroundStyle(.white.opacity(0.64))
-
                         Button(role: .destructive) {
                             showDeleteConfirmation = true
                         } label: {
-                            Label("Ask iOS to Delete \(library.deleteCount)", systemImage: "checkmark.shield.fill")
+                            Label("Delete \(library.deleteCount) Photo\(library.deleteCount == 1 ? "" : "s")", systemImage: "trash.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -88,7 +85,7 @@ struct DeleteReviewView: View {
                         .disabled(library.isDeleting)
                     }
                     .padding(16)
-                    .background(.black.opacity(0.82))
+                    .background(.regularMaterial)
                 }
             }
             .confirmationDialog(
@@ -98,15 +95,18 @@ struct DeleteReviewView: View {
             ) {
                 Button("Delete \(library.deleteCount) Item\(library.deleteCount == 1 ? "" : "s")", role: .destructive) {
                     Task {
-                        await library.deleteQueuedAssets()
+                        let didDelete = await library.deleteQueuedAssets()
+                        if didDelete && !hasRequestedReviewAfterFirstDelete {
+                            hasRequestedReviewAfterFirstDelete = true
+                            requestReview()
+                        }
                     }
                 }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("PhotoSweep cannot bypass the iOS confirmation. You can still recover deleted items from Recently Deleted for 30 days.")
+                Text("CleanRoll cannot bypass the iOS confirmation. You can still recover deleted items from Recently Deleted for 30 days.")
             }
         }
-        .preferredColorScheme(.dark)
     }
 
     private func deleteTile(_ asset: PHAsset) -> some View {

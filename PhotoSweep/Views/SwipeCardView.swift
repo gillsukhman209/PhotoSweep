@@ -85,7 +85,6 @@ struct SwipeCardView: View {
         }
         .sheet(isPresented: $showingDetails) {
             AssetDetailsView(asset: asset)
-                .preferredColorScheme(.dark)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Current photo")
