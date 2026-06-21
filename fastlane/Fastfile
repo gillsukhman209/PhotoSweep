@@ -11,6 +11,7 @@ platform :ios do
     build_app(
       scheme: "PhotoSweep",
       export_method: "app-store",
+      xcargs: "CODE_SIGN_IDENTITY='Apple Distribution' CODE_SIGN_STYLE=Manual PROVISIONING_PROFILE_SPECIFIER='New Profile 2026'",
       export_options: {
         signingStyle: "manual",
         provisioningProfiles: {
