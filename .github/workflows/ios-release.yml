@@ -31,10 +31,14 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
           security import $CERT_PATH -P "$P12_PASSWORD" -A -k $KEYCHAIN_PATH
           security list-keychains -d user -s $KEYCHAIN_PATH
+          security default-keychain -s $KEYCHAIN_PATH
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" $KEYCHAIN_PATH
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
-          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/
 
+          PROFILE_UUID=$(security cms -D -i $PP_PATH | /usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin)
+          cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
+          
       - name: Install Fastlane
         run: gem install fastlane
 
