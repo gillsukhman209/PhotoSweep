@@ -36,7 +36,8 @@ jobs:
 
           mkdir -p ~/Library/MobileDevice/Provisioning\ Profiles
 
-          PROFILE_UUID=$(security cms -D -i $PP_PATH | /usr/libexec/PlistBuddy -c 'Print UUID' /dev/stdin)
+          security cms -D -i $PP_PATH > $RUNNER_TEMP/profile.plist
+          PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' $RUNNER_TEMP/profile.plist)
           cp $PP_PATH ~/Library/MobileDevice/Provisioning\ Profiles/$PROFILE_UUID.mobileprovision
           
       - name: Install Fastlane
