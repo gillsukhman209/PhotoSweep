@@ -10,7 +10,13 @@ platform :ios do
 
     build_app(
       scheme: "PhotoSweep",
-      export_method: "app-store"
+      export_method: "app-store",
+      export_options: {
+        signingStyle: "manual",
+        provisioningProfiles: {
+          "com.gill.photosweep" => "New Profile 2026"
+        }
+      }
     )
 
     upload_to_testflight
