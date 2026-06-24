@@ -1,3 +1,4 @@
+import AVKit
 import Photos
 import SwiftUI
 import UIKit
@@ -96,10 +97,16 @@ struct SwipeCardView: View {
                 screenshotBackdrop
             }
 
-            AssetImageView(asset: asset, contentMode: .fit)
-                .padding(isScreenshot ? 18 : 0)
-                .scaleEffect(zoomScale)
-                .offset(imageOffset)
+            if asset.mediaType == .video {
+                AssetVideoPlayerView(asset: asset)
+                    .scaleEffect(zoomScale)
+                    .offset(imageOffset)
+            } else {
+                AssetImageView(asset: asset, contentMode: .fit)
+                    .padding(isScreenshot ? 18 : 0)
+                    .scaleEffect(zoomScale)
+                    .offset(imageOffset)
+            }
         }
     }
 
@@ -350,6 +357,128 @@ struct SwipeCardView: View {
             offset = .zero
             isExiting = false
             completion()
+        }
+    }
+}
+
+private struct AssetVideoPlayerView: View {
+    let asset: PHAsset
+
+    @AppStorage("PhotoSweep.videoMuted") private var isVideoMuted = false
+    @State private var player: AVPlayer?
+    @State private var requestID: PHImageRequestID?
+    @State private var isLoading = true
+    @State private var errorMessage: String?
+
+    var body: some View {
+        ZStack {
+            AssetImageView(asset: asset, contentMode: .fit)
+
+            if let player {
+                VideoPlayer(player: player)
+                    .background(Color.black)
+                    .transition(.opacity)
+            } else {
+                Color.black.opacity(0.72)
+            }
+
+            if isLoading {
+                ProgressView()
+                    .controlSize(.large)
+                    .tint(.white)
+                    .padding(18)
+                    .background(.black.opacity(0.58), in: Circle())
+            }
+
+            if let errorMessage {
+                VStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.title2.weight(.bold))
+                    Text(errorMessage)
+                        .font(.footnote.weight(.semibold))
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundStyle(.white)
+                .padding(16)
+                .background(.black.opacity(0.70), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(24)
+            }
+        }
+        .overlay(alignment: .bottomTrailing) {
+            Button {
+                isVideoMuted.toggle()
+                player?.isMuted = isVideoMuted
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                AnalyticsService.track("video_sound_toggled", properties: [
+                    "is_muted": isVideoMuted
+                ])
+            } label: {
+                Image(systemName: isVideoMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                    .font(.system(size: 18, weight: .black))
+                    .foregroundStyle(.white)
+                    .frame(width: 42, height: 42)
+                    .background(.black.opacity(0.62), in: Circle())
+                    .overlay {
+                        Circle()
+                            .stroke(.white.opacity(0.16), lineWidth: 1)
+                    }
+            }
+            .buttonStyle(.plain)
+            .padding(14)
+            .accessibilityLabel(isVideoMuted ? "Turn video sound on" : "Turn video sound off")
+        }
+        .task(id: asset.localIdentifier) {
+            loadPlayerItem()
+        }
+        .onChange(of: isVideoMuted) {
+            player?.isMuted = isVideoMuted
+        }
+        .onDisappear {
+            player?.pause()
+            cancelRequest()
+        }
+    }
+
+    private func loadPlayerItem() {
+        cancelRequest()
+        isLoading = true
+        errorMessage = nil
+        player?.pause()
+        player = nil
+
+        let options = PHVideoRequestOptions()
+        options.deliveryMode = .automatic
+        options.isNetworkAccessAllowed = true
+
+        requestID = PHImageManager.default().requestPlayerItem(forVideo: asset, options: options) { playerItem, info in
+            DispatchQueue.main.async {
+                let cancelled = (info?[PHImageCancelledKey] as? Bool) == true
+                guard !cancelled else { return }
+
+                isLoading = false
+
+                if let error = info?[PHImageErrorKey] as? Error {
+                    errorMessage = error.localizedDescription
+                    return
+                }
+
+                guard let playerItem else {
+                    errorMessage = "Video unavailable"
+                    return
+                }
+
+                let nextPlayer = AVPlayer(playerItem: playerItem)
+                nextPlayer.isMuted = isVideoMuted
+                player = nextPlayer
+                nextPlayer.play()
+            }
+        }
+    }
+
+    private func cancelRequest() {
+        if let requestID {
+            PHImageManager.default().cancelImageRequest(requestID)
+            self.requestID = nil
         }
     }
 }

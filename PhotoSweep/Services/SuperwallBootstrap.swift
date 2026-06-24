@@ -1,62 +1,4 @@
 import Foundation
-
-#if DEBUG
-enum SuperwallBootstrap {
-    enum RestoreOutcome {
-        case restoredProAccess
-        case noPurchaseFound
-        case failed(String)
-    }
-
-    static var hasProAccess: Bool {
-        debugLog("hasProAccess=true because Debug builds bypass the paywall")
-        return true
-    }
-
-    @discardableResult
-    static func configure() -> Bool {
-        debugLog("configure skipped in Debug; Superwall is disabled")
-        return false
-    }
-
-    static func register(placement: String, feature: @escaping () -> Void) {
-        debugLog("register placement=\(placement) bypassed in Debug; running feature")
-        DispatchQueue.main.async {
-            feature()
-        }
-    }
-
-    static func requireProAccess(
-        placement: String,
-        params: [String: Any]? = nil,
-        onComplete: @escaping () -> Void = {},
-        feature: @escaping () -> Void
-    ) {
-        debugLog("requireProAccess placement=\(placement) bypassed in Debug; unlocking feature")
-        DispatchQueue.main.async {
-            onComplete()
-            feature()
-        }
-    }
-
-    static func presentPaywall(placement: String, source: String) {
-        debugLog("presentPaywall placement=\(placement) source=\(source) ignored in Debug")
-    }
-
-    static func presentDebugPaywall(placement: String, source: String) {
-        debugLog("presentDebugPaywall placement=\(placement) source=\(source) ignored in Debug")
-    }
-
-    static func restorePurchases() async -> RestoreOutcome {
-        debugLog("restorePurchases ignored in Debug")
-        return .restoredProAccess
-    }
-
-    private static func debugLog(_ message: String) {
-        print("PhotoSweepPaywall \(message)")
-    }
-}
-#else
 import SuperwallKit
 
 enum SuperwallBootstrap {
@@ -304,4 +246,3 @@ enum SuperwallBootstrap {
         print("PhotoSweepPaywall \(message)")
     }
 }
-#endif

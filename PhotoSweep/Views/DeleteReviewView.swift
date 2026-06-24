@@ -9,7 +9,10 @@ struct DeleteReviewView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     @AppStorage("PhotoSweep.hasRequestedReviewAfterFirstDelete") private var hasRequestedReviewAfterFirstDelete = false
+    @AppStorage("PhotoSweep.dailySwipeCount") private var freeSwipeCountUsed = 0
+    @AppStorage("PhotoSweep.successfulReviewDeleteCount") private var successfulReviewDeleteCount = 0
     @State private var showDeleteConfirmation = false
+    @State private var isPresentingDeletePaywall = false
     private let deleteColor = Color(red: 1.0, green: 0.32, blue: 0.36)
 
     private var backgroundColor: Color {
@@ -82,7 +85,7 @@ struct DeleteReviewView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.large)
-                        .disabled(library.isDeleting)
+                        .disabled(library.isDeleting || isPresentingDeletePaywall)
                     }
                     .padding(16)
                     .background(.regularMaterial)
@@ -95,9 +98,12 @@ struct DeleteReviewView: View {
             ) {
                 Button("Delete \(library.deleteCount) Item\(library.deleteCount == 1 ? "" : "s")", role: .destructive) {
                     Task {
-                        let didDelete = await library.deleteQueuedAssets()
+                        let didDelete = await deleteMarkedPhotos()
                         if didDelete && !hasRequestedReviewAfterFirstDelete {
                             hasRequestedReviewAfterFirstDelete = true
+                            AnalyticsService.track("review_prompt_requested", properties: [
+                                "trigger": "first_review_delete"
+                            ])
                             requestReview()
                         }
                     }
@@ -107,6 +113,68 @@ struct DeleteReviewView: View {
                 Text("CleanRoll cannot bypass the iOS confirmation. You can still recover deleted items from Recently Deleted for 30 days.")
             }
         }
+    }
+
+    @MainActor
+    @discardableResult
+    private func deleteMarkedPhotos() async -> Bool {
+        if SuperwallBootstrap.hasProAccess {
+            return await library.deleteQueuedAssets()
+        }
+
+        guard freeSwipeCountUsed < LifetimeSwipeGate.freeSwipeLimit else {
+            presentDeleteLimitPaywall(reason: "free_swipe_limit_pre_delete")
+            return false
+        }
+
+        guard successfulReviewDeleteCount < LifetimeSwipeGate.freeReviewDeleteLimit else {
+            presentDeleteLimitPaywall(reason: "review_delete_limit_pre_delete")
+            return false
+        }
+
+        let didDelete = await library.deleteQueuedAssets()
+        guard didDelete else { return false }
+
+        successfulReviewDeleteCount += 1
+        AnalyticsService.track("review_delete_session_used", properties: [
+            "successful_review_delete_count": successfulReviewDeleteCount,
+            "free_review_delete_limit": LifetimeSwipeGate.freeReviewDeleteLimit,
+            "free_swipes_used": freeSwipeCountUsed,
+            "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit
+        ])
+
+        if successfulReviewDeleteCount >= LifetimeSwipeGate.freeReviewDeleteLimit && !SuperwallBootstrap.hasProAccess {
+            presentDeleteLimitPaywall(reason: "review_delete_limit_after_delete")
+        }
+
+        return true
+    }
+
+    private func presentDeleteLimitPaywall(reason: String) {
+        guard !isPresentingDeletePaywall else { return }
+        isPresentingDeletePaywall = true
+        AnalyticsService.track("review_delete_limit_reached", properties: [
+            "successful_review_delete_count": successfulReviewDeleteCount,
+            "free_review_delete_limit": LifetimeSwipeGate.freeReviewDeleteLimit,
+            "free_swipes_used": freeSwipeCountUsed,
+            "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+            "reason": reason
+        ])
+
+        SuperwallBootstrap.requireProAccess(
+            placement: "photo_sweep",
+            params: [
+                "trigger": reason,
+                "successful_review_delete_count": successfulReviewDeleteCount,
+                "free_review_delete_limit": LifetimeSwipeGate.freeReviewDeleteLimit,
+                "free_swipes_used": freeSwipeCountUsed,
+                "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+                "reason": reason
+            ],
+            onComplete: {
+                isPresentingDeletePaywall = false
+            }
+        ) {}
     }
 
     private func deleteTile(_ asset: PHAsset) -> some View {

@@ -34,7 +34,7 @@ Key features:
 
 PhotoSweep does not bypass iOS deletion protections. Photos are queued first, and iOS may ask for final confirmation before deleting anything.
 
-PhotoSweep Pro unlocks unlimited cleanup access after the daily free swipe limit.
+PhotoSweep Pro is a one-time Lifetime Pro upgrade that unlocks unlimited cleanup access after the daily free swipe limit. No subscription is required.
 
 Keywords:
 photo cleaner,cleaner,photos,delete,duplicates,screenshots,videos,storage,swipe,camera roll
@@ -58,7 +58,7 @@ Version:
 1.0
 
 Age rating notes:
-No user-generated public content, no web browsing, no gambling, no contests, no medical content, no unrestricted internet access. App works with the user's local photo library and subscription/paywall flows.
+No user-generated public content, no web browsing, no gambling, no contests, no medical content, no unrestricted internet access. App works with the user's local photo library and an optional one-time Lifetime Pro purchase flow.
 
 Privacy notes:
-The app accesses the photo library for core functionality. Photo/video content is processed on device and not uploaded by PhotoSweep. Superwall/Apple purchase services may process subscription, device, and interaction data for purchases, paywall presentation, and analytics.
+The app accesses the photo library for core functionality. Photo/video content is processed on device and not uploaded by PhotoSweep. Superwall/Apple purchase services may process purchase, device, and interaction data for the one-time Lifetime Pro upgrade, paywall presentation, and analytics.

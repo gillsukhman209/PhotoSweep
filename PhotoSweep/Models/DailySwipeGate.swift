@@ -1,7 +1,8 @@
 import Foundation
 
 enum LifetimeSwipeGate {
-    static let freeSwipeLimit = 15
+    static let freeSwipeLimit = 50
+    static let freeReviewDeleteLimit = 2
 
     static func canUseFreeSwipes(
         usedCount: Int,

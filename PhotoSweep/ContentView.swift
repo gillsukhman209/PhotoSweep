@@ -168,6 +168,7 @@ struct ContentView: View {
     @AppStorage("PhotoSweep.hasSeenMainTutorial.v1") private var hasSeenMainTutorial = false
     @AppStorage("PhotoSweep.tiltToSwipeEnabled") private var tiltToSwipeEnabled = false
     @AppStorage("PhotoSweep.dailySwipeCount") private var freeSwipeCountUsed = 0
+    @AppStorage("PhotoSweep.successfulReviewDeleteCount") private var successfulReviewDeleteCount = 0
     @State private var showingDeleteReview = false
     @State private var showingDuplicateReview = false
     @State private var showingDateJump = false
@@ -496,20 +497,26 @@ struct ContentView: View {
     }
 
     private var topControls: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("CleanRoll")
+                    .font(.system(size: 24, weight: .black, design: .rounded))
+                    .foregroundStyle(primaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.58)
+
+                Text(positionText)
+                    .font(.system(.caption, design: .rounded).weight(.bold))
+                    .monospacedDigit()
+                    .foregroundStyle(secondaryText)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .accessibilityLabel("Review progress \(positionText)")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .layoutPriority(1)
+
             filterMenu
-
-            Spacer(minLength: 0)
-
-            Text(positionText)
-                .font(.system(.subheadline, design: .rounded).weight(.bold))
-                .monospacedDigit()
-                .foregroundStyle(secondaryText)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .accessibilityLabel("Review progress \(positionText)")
-
-            Spacer(minLength: 0)
 
             topIconButton(
                 systemImage: "calendar",
@@ -557,7 +564,7 @@ struct ContentView: View {
                 }
             }
         }
-        .frame(height: 50)
+        .frame(height: 62)
     }
 
     private var filterMenu: some View {
@@ -787,17 +794,47 @@ struct ContentView: View {
                 advanceTutorialAfterSwipeIfNeeded(reviewDecision)
             }
 
-            #if DEBUG
-            debugPaywallLog("DEBUG build: bypassing paywall and free swipe limit")
-            runSwipeAction()
-            trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, proUser: false)
-            return
-            #endif
-
             let hasProAccess = SuperwallBootstrap.hasProAccess
             debugPaywallLog(
                 "swipe decision source=\(source) decision=\(reviewDecision.rawValue) requestedCount=\(count) freeSwipeCountUsed=\(freeSwipeCountUsed) hasProAccess=\(hasProAccess)"
             )
+
+            let presentSwipeLimitPaywall = { (trigger: String) in
+                guard !isPresentingSwipePaywall else {
+                    debugPaywallLog("blocked paywall request because a paywall is already being presented")
+                    return
+                }
+                isPresentingSwipePaywall = true
+                debugPaywallLog("usage limit reached trigger=\(trigger); requesting Superwall placement=photo_sweep")
+                AnalyticsService.track("free_swipe_limit_reached", properties: [
+                    "free_swipes_used": freeSwipeCountUsed,
+                    "requested_swipe_count": count,
+                    "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+                    "successful_review_delete_count": successfulReviewDeleteCount,
+                    "free_review_delete_limit": LifetimeSwipeGate.freeReviewDeleteLimit,
+                    "free_limit_type": "lifetime",
+                    "trigger": trigger,
+                    "source": source,
+                    "decision": reviewDecision.rawValue
+                ])
+
+                SuperwallBootstrap.requireProAccess(
+                    placement: "photo_sweep",
+                    params: [
+                        "trigger": trigger,
+                        "free_swipes_used": freeSwipeCountUsed,
+                        "requested_swipe_count": count,
+                        "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
+                        "successful_review_delete_count": successfulReviewDeleteCount,
+                        "free_review_delete_limit": LifetimeSwipeGate.freeReviewDeleteLimit,
+                        "free_limit_type": "lifetime"
+                    ],
+                    onComplete: {
+                        debugPaywallLog("Superwall paywall flow completed; clearing isPresentingSwipePaywall")
+                        isPresentingSwipePaywall = false
+                    }
+                ) {}
+            }
 
             if hasProAccess {
                 debugPaywallLog("allowing swipe because Pro access is active")
@@ -806,46 +843,24 @@ struct ContentView: View {
                 return
             }
 
+            if successfulReviewDeleteCount >= LifetimeSwipeGate.freeReviewDeleteLimit {
+                presentSwipeLimitPaywall("review_delete_limit")
+                return
+            }
+
             if LifetimeSwipeGate.canUseFreeSwipes(usedCount: freeSwipeCountUsed, requestedCount: count) {
-                debugPaywallLog("allowing lifetime free swipe; count \(freeSwipeCountUsed) -> \(freeSwipeCountUsed + count)")
-                freeSwipeCountUsed += count
+                let nextFreeSwipeCount = freeSwipeCountUsed + count
+                debugPaywallLog("allowing lifetime free swipe; count \(freeSwipeCountUsed) -> \(nextFreeSwipeCount)")
+                freeSwipeCountUsed = nextFreeSwipeCount
                 runSwipeAction()
                 trackSwipeDecision(reviewDecision, source: source, count: count, gated: false, proUser: false)
-                return
-            }
-
-            guard !isPresentingSwipePaywall else {
-                debugPaywallLog("blocked paywall request because a paywall is already being presented")
-                return
-            }
-            isPresentingSwipePaywall = true
-            debugPaywallLog("free limit reached; requesting Superwall placement=photo_sweep")
-            AnalyticsService.track("free_swipe_limit_reached", properties: [
-                "free_swipes_used": freeSwipeCountUsed,
-                "requested_swipe_count": count,
-                "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
-                "free_limit_type": "lifetime",
-                "source": source,
-                "decision": reviewDecision.rawValue
-            ])
-
-            SuperwallBootstrap.requireProAccess(
-                placement: "photo_sweep",
-                params: [
-                    "free_swipes_used": freeSwipeCountUsed,
-                    "requested_swipe_count": count,
-                    "free_swipe_limit": LifetimeSwipeGate.freeSwipeLimit,
-                    "free_limit_type": "lifetime"
-                ],
-                onComplete: {
-                    debugPaywallLog("Superwall paywall flow completed; clearing isPresentingSwipePaywall")
-                    isPresentingSwipePaywall = false
+                if nextFreeSwipeCount >= LifetimeSwipeGate.freeSwipeLimit {
+                    presentSwipeLimitPaywall("free_swipe_limit")
                 }
-            ) {
-                debugPaywallLog("Superwall unlocked swipe action after purchase/restore")
-                runSwipeAction()
-                trackSwipeDecision(reviewDecision, source: source, count: count, gated: true, proUser: true)
+                return
             }
+
+            presentSwipeLimitPaywall("free_swipe_limit")
         }
 
         if Thread.isMainThread {
