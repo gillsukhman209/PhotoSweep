@@ -141,6 +141,9 @@ enum SuperwallBootstrap {
                 AnalyticsService.track(result == .restored ? "paywall_restored" : "paywall_purchased", properties: [
                     "placement": placement
                 ])
+                Task { @MainActor in
+                    NotificationManager.shared.cancelUnpaidReminders()
+                }
                 unlockIfSubscribed()
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     unlockIfSubscribed()
@@ -153,6 +156,9 @@ enum SuperwallBootstrap {
                     "placement": placement,
                     "result": "declined"
                 ])
+                Task { @MainActor in
+                    NotificationManager.shared.schedulePaywallAbandonedReminders(source: placement)
+                }
                 finish()
             }
         }

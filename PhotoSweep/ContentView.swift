@@ -267,6 +267,7 @@ struct ContentView: View {
                     }
                 )
                 .environmentObject(library)
+                .environmentObject(NotificationManager.shared)
             }
             .task {
                 guard hasCompletedOnboarding else { return }
@@ -1247,11 +1248,15 @@ private struct QuickSkipThumbnail: View {
 private struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var library: PhotoLibraryStore
+    @EnvironmentObject private var notificationManager: NotificationManager
     @Binding var tiltToSwipeEnabled: Bool
     @Binding var hasCompletedOnboarding: Bool
     let onShowPro: () -> Void
     @State private var isRestoringPurchases = false
     @State private var isResettingPhotos = false
+    @State private var dailyReminderEnabled = false
+    @State private var unpaidReminderEnabled = false
+    @State private var dailyReminderDate = Date()
     @State private var restoreAlert: RestoreAlert?
 
     var body: some View {
@@ -1298,6 +1303,72 @@ private struct SettingsView: View {
                     Text("Off by default. Tilt left marks delete. Tilt right keeps.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
+                }
+
+                Section {
+                    Toggle(isOn: Binding(
+                        get: { dailyReminderEnabled },
+                        set: { newValue in
+                            dailyReminderEnabled = newValue
+                            Task {
+                                await notificationManager.setDailyReminderEnabled(newValue)
+                                await MainActor.run {
+                                    dailyReminderEnabled = notificationManager.dailyReminderEnabled
+                                }
+                            }
+                        }
+                    )) {
+                        Label("Daily Cleanup Reminder", systemImage: "bell.badge.fill")
+                    }
+                    .tint(Color(red: 0.18, green: 0.78, blue: 0.49))
+
+                    if dailyReminderEnabled {
+                        DatePicker(
+                            "Reminder Time",
+                            selection: Binding(
+                                get: { dailyReminderDate },
+                                set: { newValue in
+                                    dailyReminderDate = newValue
+                                    notificationManager.updateDailyReminderTime(newValue)
+                                }
+                            ),
+                            displayedComponents: .hourAndMinute
+                        )
+                    }
+
+                    Toggle(isOn: Binding(
+                        get: { unpaidReminderEnabled },
+                        set: { newValue in
+                            unpaidReminderEnabled = newValue
+                            Task {
+                                await notificationManager.setUnpaidReminderEnabled(newValue)
+                                await MainActor.run {
+                                    unpaidReminderEnabled = notificationManager.unpaidReminderEnabled
+                                }
+                            }
+                        }
+                    )) {
+                        Label("Cleanup Comeback Reminders", systemImage: "arrow.uturn.backward.circle.fill")
+                    }
+                    .tint(Color(red: 0.18, green: 0.78, blue: 0.49))
+
+                    HStack {
+                        Label(notificationPermissionText, systemImage: notificationPermissionIcon)
+                            .foregroundStyle(.secondary)
+
+                        Spacer()
+
+                        if notificationManager.authorizationStatus == .denied {
+                            Button("Open Settings") {
+                                notificationManager.openSystemSettings()
+                            }
+                        }
+                    }
+                    .font(.footnote)
+                } header: {
+                    Text("Notifications")
+                } footer: {
+                    Text("Daily reminders repeat once per day. Comeback reminders only appear after an unpaid paywall is dismissed.")
                 }
 
                 #if DEBUG
@@ -1347,6 +1418,14 @@ private struct SettingsView: View {
             .background(Color(uiColor: .systemGroupedBackground))
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            .onAppear {
+                dailyReminderEnabled = notificationManager.dailyReminderEnabled
+                unpaidReminderEnabled = notificationManager.unpaidReminderEnabled
+                dailyReminderDate = notificationManager.dailyReminderDate
+                Task {
+                    await notificationManager.refreshAuthorizationStatus()
+                }
+            }
             .alert(item: $restoreAlert) { alert in
                 Alert(
                     title: Text(alert.title),
@@ -1408,6 +1487,32 @@ private struct SettingsView: View {
         }
     }
     #endif
+
+    private var notificationPermissionText: String {
+        switch notificationManager.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return "Notifications are enabled"
+        case .denied:
+            return "Notifications are off in iOS Settings"
+        case .notDetermined:
+            return "Notifications have not been enabled yet"
+        @unknown default:
+            return "Notification status unavailable"
+        }
+    }
+
+    private var notificationPermissionIcon: String {
+        switch notificationManager.authorizationStatus {
+        case .authorized, .provisional, .ephemeral:
+            return "checkmark.circle.fill"
+        case .denied:
+            return "xmark.circle.fill"
+        case .notDetermined:
+            return "bell.slash.fill"
+        @unknown default:
+            return "questionmark.circle.fill"
+        }
+    }
 
     private struct RestoreAlert: Identifiable {
         let id = UUID()
